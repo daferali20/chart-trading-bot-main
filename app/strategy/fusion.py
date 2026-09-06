@@ -100,6 +100,7 @@ class SignalFusionEngine:
             )
 
         signed_vote = 0.0
+        total_base_weight = 0.0
         total_effective_weight = 0.0
         confidence_weighted = 0.0
         quality_weighted = 0.0
@@ -119,6 +120,7 @@ class SignalFusionEngine:
             )
 
             signed_vote += vote
+            total_base_weight += signal.weight
             total_effective_weight += effective_weight
             confidence_weighted += signal.confidence * effective_weight
             quality_weighted += signal.quality * effective_weight
@@ -143,12 +145,15 @@ class SignalFusionEngine:
                 }
             )
 
-        if total_effective_weight <= 0:
+        if total_base_weight <= 0 or total_effective_weight <= 0:
             direction_strength_signed = 0.0
             confidence = 0.0
             quality = 0.0
         else:
-            direction_strength_signed = signed_vote / total_effective_weight
+            # Divide by the original, pre-regime weight. This is intentional:
+            # adverse regimes must truly suppress direction strength rather
+            # than mathematically cancelling out of the ratio.
+            direction_strength_signed = signed_vote / total_base_weight
             confidence = confidence_weighted / total_effective_weight
             quality = quality_weighted / total_effective_weight
 
@@ -160,8 +165,6 @@ class SignalFusionEngine:
         else:
             direction = SignalDirection.SHORT
 
-        # Transparent composite: agreement/direction has the largest weight,
-        # followed by model confidence and signal quality.
         score = 100.0 * (
             (0.50 * absolute_strength)
             + (0.30 * confidence)
