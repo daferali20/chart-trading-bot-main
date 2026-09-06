@@ -1,0 +1,6 @@
+# One US stock symbol per line
+# Add/remove symbols here. Lines beginning with # are ignored.
+AAPL
+NVDA
+TSLA
+BIAF
