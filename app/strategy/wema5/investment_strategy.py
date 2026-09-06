@@ -5,6 +5,8 @@ from typing import Optional
 
 import pandas as pd
 
+from app.analysis.feature_engine import FeatureConfig, FeatureEngine
+
 
 @dataclass
 class InvestmentSignal:
@@ -67,17 +69,7 @@ class WEMA5InvestmentStrategy:
         self.williams_entry_level = williams_entry_level
 
     def add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add indicators required by WEMA5_INVESTMENT_v1.
-
-        Required columns:
-            date
-            open
-            high
-            low
-            close
-            volume
-        """
+        """Add shared features while preserving configurable WEMA5 periods."""
 
         required = {
             "date",
@@ -87,142 +79,44 @@ class WEMA5InvestmentStrategy:
             "close",
             "volume",
         }
-
         missing = required - set(df.columns)
-
         if missing:
-            raise ValueError(
-                f"Missing required columns: {sorted(missing)}"
-            )
+            raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-        out = df.copy()
+        clean = df.copy()
+        clean["date"] = pd.to_datetime(clean["date"], errors="coerce")
+        for column in ("open", "high", "low", "close", "volume"):
+            clean[column] = pd.to_numeric(clean[column], errors="coerce")
 
-        out["date"] = pd.to_datetime(out["date"], errors="coerce")
+        clean = clean.dropna(subset=["date", "open", "high", "low", "close"])
+        clean = clean.sort_values("date")
+        clean = clean.drop_duplicates(subset=["date"], keep="last")
 
-        numeric_columns = [
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-        ]
-
-        for column in numeric_columns:
-            out[column] = pd.to_numeric(
-                out[column],
-                errors="coerce",
-            )
-
-        out = out.dropna(
-            subset=[
-                "date",
-                "open",
-                "high",
-                "low",
-                "close",
-            ]
+        config = FeatureConfig(
+            williams_period=self.williams_period,
+            ema_periods=tuple(sorted({self.ema_period, 20, 50})),
+            ma_periods=tuple(sorted({self.ma_period, 50, 200})),
         )
+        out = FeatureEngine(config).build(clean)
 
-        out = out.sort_values("date")
-        out = out.drop_duplicates(
-            subset=["date"],
-            keep="last",
-        )
+        # Preserve the historical WEMA5 column contract even when callers
+        # experiment with non-default periods.
+        out["ma35"] = out[f"ma{self.ma_period}"]
+        out["ema10"] = out[f"ema{self.ema_period}"]
 
-        # ---------------------------------------------------------
-        # Williams %R
-        # ---------------------------------------------------------
-
-        highest_high = (
-            out["high"]
-            .rolling(
-                self.williams_period,
-                min_periods=self.williams_period,
-            )
-            .max()
-        )
-
-        lowest_low = (
-            out["low"]
-            .rolling(
-                self.williams_period,
-                min_periods=self.williams_period,
-            )
-            .min()
-        )
-
-        denominator = highest_high - lowest_low
-
-        denominator = denominator.replace(0, pd.NA)
-
-        out["williams_r"] = (
-            -100
-            * (
-                highest_high - out["close"]
-            )
-            / denominator
-        )
-
-        # ---------------------------------------------------------
-        # MA35
-        # ---------------------------------------------------------
-
-        out["ma35"] = (
-            out["close"]
-            .rolling(
-                self.ma_period,
-                min_periods=self.ma_period,
-            )
-            .mean()
-        )
-
-        # ---------------------------------------------------------
-        # EMA10
-        # ---------------------------------------------------------
-
-        out["ema10"] = (
-            out["close"]
-            .ewm(
-                span=self.ema_period,
-                adjust=False,
-                min_periods=self.ema_period,
-            )
-            .mean()
-        )
-
-        # Previous Williams value
         out["williams_prev"] = out["williams_r"].shift(1)
-
-        # Williams cross above -55
         out["williams_cross_up"] = (
             (out["williams_prev"] < self.williams_entry_level)
-            & (
-                out["williams_r"]
-                >= self.williams_entry_level
-            )
+            & (out["williams_r"] >= self.williams_entry_level)
         )
-
-        # Trend conditions
-        out["close_above_ma35"] = (
-            out["close"] > out["ma35"]
-        )
-
-        out["close_above_ema10"] = (
-            out["close"] > out["ema10"]
-        )
-
-        # Complete entry condition
+        out["close_above_ma35"] = out["close"] > out["ma35"]
+        out["close_above_ema10"] = out["close"] > out["ema10"]
         out["entry_condition"] = (
             out["williams_cross_up"]
             & out["close_above_ma35"]
             & out["close_above_ema10"]
         )
-
-        # Exit condition
-        out["exit_condition"] = (
-            out["close"] < out["ma35"]
-        )
-
+        out["exit_condition"] = out["close"] < out["ma35"]
         return out
 
     def generate_signal(
@@ -258,11 +152,8 @@ class WEMA5InvestmentStrategy:
             )
 
         data = self.add_indicators(df)
-
         row = data.iloc[-1]
-
         date = row["date"]
-
         close = float(row["close"])
         williams = row["williams_r"]
         ma35 = row["ma35"]
@@ -273,27 +164,11 @@ class WEMA5InvestmentStrategy:
                 action="HOLD",
                 date=date,
                 price=close,
-                williams_r=(
-                    None
-                    if pd.isna(williams)
-                    else float(williams)
-                ),
-                ma35=(
-                    None
-                    if pd.isna(ma35)
-                    else float(ma35)
-                ),
-                ema10=(
-                    None
-                    if pd.isna(ema10)
-                    else float(ema10)
-                ),
+                williams_r=None if pd.isna(williams) else float(williams),
+                ma35=None if pd.isna(ma35) else float(ma35),
+                ema10=None if pd.isna(ema10) else float(ema10),
                 reason="Indicators not ready",
             )
-
-        # ---------------------------------------------------------
-        # EXIT
-        # ---------------------------------------------------------
 
         if in_position and bool(row["exit_condition"]):
             return InvestmentSignal(
@@ -303,14 +178,8 @@ class WEMA5InvestmentStrategy:
                 williams_r=float(williams),
                 ma35=float(ma35),
                 ema10=float(ema10),
-                reason=(
-                    "Daily close below MA35"
-                ),
+                reason="Daily close below MA35",
             )
-
-        # ---------------------------------------------------------
-        # BUY
-        # ---------------------------------------------------------
 
         if not in_position and bool(row["entry_condition"]):
             return InvestmentSignal(
@@ -326,23 +195,13 @@ class WEMA5InvestmentStrategy:
                 ),
             )
 
-        # ---------------------------------------------------------
-        # HOLD
-        # ---------------------------------------------------------
-
         if in_position:
             if close > float(ma35):
-                reason = (
-                    "HOLD — price remains above MA35"
-                )
+                reason = "HOLD — price remains above MA35"
             else:
-                reason = (
-                    "HOLD — exit condition not confirmed"
-                )
+                reason = "HOLD — exit condition not confirmed"
         else:
-            reason = (
-                "No investment entry condition"
-            )
+            reason = "No investment entry condition"
 
         return InvestmentSignal(
             action="HOLD",
