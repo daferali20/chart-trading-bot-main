@@ -5,6 +5,8 @@ from typing import Optional
 
 import pandas as pd
 
+from app.analysis.feature_engine import DEFAULT_FEATURE_ENGINE
+
 
 @dataclass
 class WEMA5Signal:
@@ -46,52 +48,13 @@ class WEMA5Strategy:
 
     @staticmethod
     def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add Williams %R(14) and EMA10.
+        """Add the shared feature set used by WEMA5.
 
-        Required columns:
-            high
-            low
-            close
+        WEMA5 still consumes the same canonical columns it always used:
+        ``williams_r`` and ``ema10``. The entry/exit rules are unchanged.
         """
 
-        if df is None or df.empty:
-            raise ValueError("DataFrame is empty.")
-
-        required = {"high", "low", "close"}
-        missing = required - set(df.columns)
-
-        if missing:
-            raise ValueError(
-                f"Missing required columns: {sorted(missing)}"
-            )
-
-        out = df.copy()
-
-        highest_high = out["high"].rolling(
-            WEMA5Strategy.WILLIAMS_PERIOD
-        ).max()
-
-        lowest_low = out["low"].rolling(
-            WEMA5Strategy.WILLIAMS_PERIOD
-        ).min()
-
-        denominator = (
-            highest_high - lowest_low
-        ).replace(0, pd.NA)
-
-        out["williams_r"] = (
-            -100
-            * (highest_high - out["close"])
-            / denominator
-        )
-
-        out["ema10"] = out["close"].ewm(
-            span=WEMA5Strategy.EMA_PERIOD,
-            adjust=False,
-        ).mean()
-
-        return out
+        return DEFAULT_FEATURE_ENGINE.build(df)
 
     @classmethod
     def detect_entry(
