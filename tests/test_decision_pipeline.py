@@ -143,6 +143,15 @@ class DecisionPipelineTests(unittest.TestCase):
                 max_symbol_weight=1.0,
                 max_sector_weight=1.0,
             ),
+            # This test isolates the Portfolio max-position rule. Sector risk
+            # is intentionally relaxed here only; production defaults remain
+            # capped at 40% in PortfolioRiskPolicy.
+            risk_engine=PortfolioRiskEngine(
+                PortfolioRiskPolicy(
+                    max_sector_weight=1.0,
+                    min_dollar_volume=5_000_000.0,
+                )
+            ),
         )
 
         batch = pipeline.evaluate(
