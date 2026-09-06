@@ -1,0 +1,18 @@
+{
+  "name": "WEMA5_INVESTMENT_v1",
+  "source_path": "app/strategy/wema5/investment_strategy.py",
+  "locked": true,
+  "timeframe": "daily",
+  "signal_candles": "completed",
+  "execution_timing": "next candle open in backtest",
+  "entry": {
+    "rules": [
+      "Williams %R(14) crosses upward through -55",
+      "close above MA35",
+      "close above EMA10"
+    ]
+  },
+  "exit": {
+    "rule": "completed daily close below MA35"
+  }
+}

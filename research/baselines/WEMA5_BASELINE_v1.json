@@ -1,0 +1,16 @@
+{
+  "name": "WEMA5_BASELINE_v1",
+  "source_path": "app/strategy/wema5/strategy.py",
+  "locked": true,
+  "timeframe": "daily",
+  "signal_candles": "completed",
+  "execution_timing": "next candle open in backtest",
+  "entry": {
+    "indicator": "Williams %R(14)",
+    "rule": "cross upward through -55"
+  },
+  "exit": {
+    "indicator": "EMA10",
+    "rule": "five consecutive completed closes below EMA10"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "strategies": [
+    {
+      "name": "WEMA5_BASELINE_v1",
+      "status": "BASELINE",
+      "source_path": "app/strategy/wema5/strategy.py",
+      "version": "v1",
+      "locked": true,
+      "description": "Williams %R recovery baseline with five-close EMA10 exit.",
+      "parameters": {
+        "williams_period": 14,
+        "entry_level": -55.0,
+        "ema_period": 10,
+        "exit_consecutive_candles": 5
+      },
+      "metrics": {},
+      "last_tested_at": null,
+      "notes": "Reference baseline. Source must not be overwritten by experiments."
+    },
+    {
+      "name": "WEMA5_INVESTMENT_v1",
+      "status": "RESEARCH",
+      "source_path": "app/strategy/wema5/investment_strategy.py",
+      "version": "v1",
+      "locked": true,
+      "description": "Investment/trend variant using Williams %R, MA35 and EMA10.",
+      "parameters": {
+        "williams_period": 14,
+        "entry_level": -55.0,
+        "ma_period": 35,
+        "ema_period": 10
+      },
+      "metrics": {},
+      "last_tested_at": null,
+      "notes": "Locked source snapshot; research status may progress after validation."
+    }
+  ]
+}
