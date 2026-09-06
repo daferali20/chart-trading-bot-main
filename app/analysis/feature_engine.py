@@ -17,6 +17,7 @@ class FeatureConfig:
 
     williams_period: int = 14
     williams_slope_period: int = 3
+    rsi_period: int = 14
     ema_periods: tuple[int, ...] = (10, 20, 50)
     ma_periods: tuple[int, ...] = (35, 50, 200)
     momentum_periods: tuple[int, ...] = (5, 10, 14, 20)
@@ -35,7 +36,7 @@ class FeatureEngine:
     ``date`` is optional; when present, rows are sorted chronologically.
 
     Compatibility aliases are intentionally retained for the current bot:
-    ``williams_r``, ``ema20``, ``ema50``, ``atr14``, ``volume20``,
+    ``williams_r``, ``rsi14``, ``ema20``, ``ema50``, ``atr14``, ``volume20``,
     ``breakout_high`` and ``breakout_low``.
     """
 
@@ -84,11 +85,24 @@ class FeatureEngine:
         denominator = (highest - lowest).replace(0, np.nan)
 
         out["williams_r"] = -100.0 * (highest - out["close"]) / denominator
-        out["williams14"] = out["williams_r"]
+        out[f"williams{period}"] = out["williams_r"]
+        if period == 14:
+            out["williams14"] = out["williams_r"]
         out["williams_slope"] = (
             out["williams_r"].diff(self.config.williams_slope_period)
             / float(self.config.williams_slope_period)
         )
+
+    def _add_rsi(self, out: pd.DataFrame) -> None:
+        period = self.config.rsi_period
+        delta = out["close"].diff()
+        gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        out[f"rsi{period}"] = rsi
+        if period == 14:
+            out["rsi14"] = rsi
 
     def _add_averages(self, out: pd.DataFrame) -> None:
         for period in self._positive_periods(self.config.ema_periods):
@@ -107,7 +121,6 @@ class FeatureEngine:
 
     def _add_momentum(self, out: pd.DataFrame) -> None:
         for period in self._positive_periods(self.config.momentum_periods):
-            # Percentage price change over N completed bars.
             out[f"momentum{period}"] = out["close"].pct_change(periods=period) * 100.0
 
     def _add_volume(self, out: pd.DataFrame) -> None:
@@ -166,6 +179,7 @@ class FeatureEngine:
 
         out = self.normalize(df)
         self._add_williams(out)
+        self._add_rsi(out)
         self._add_averages(out)
         self._add_momentum(out)
         self._add_volume(out)
