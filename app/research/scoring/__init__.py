@@ -1,5 +1,13 @@
-"""Research scoring models.
+"""Research scoring models with explicit robustness/overfitting penalties."""
 
-Future scoring should combine return, profit factor, win rate, stability and
-robustness while penalizing drawdown, concentration and overfitting.
-"""
+from app.research.scoring.robustness import (
+    DEFAULT_ROBUSTNESS_SCORER,
+    RobustnessScore,
+    RobustnessScorer,
+)
+
+__all__ = [
+    "RobustnessScore",
+    "RobustnessScorer",
+    "DEFAULT_ROBUSTNESS_SCORER",
+]
