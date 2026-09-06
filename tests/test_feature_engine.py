@@ -30,6 +30,7 @@ class FeatureEngineTests(unittest.TestCase):
         expected = {
             "williams_r",
             "williams_slope",
+            "rsi14",
             "momentum5",
             "momentum10",
             "momentum14",
@@ -54,8 +55,6 @@ class FeatureEngineTests(unittest.TestCase):
 
     def test_breakout_reference_uses_completed_previous_bars(self) -> None:
         data = self.sample(40)
-        # Make the current bar an extreme high. It must not contaminate the
-        # breakout reference used on this same bar.
         data.loc[25, "high"] = 999.0
         out = DEFAULT_FEATURE_ENGINE.build(data)
         expected_previous_high = data.loc[5:24, "high"].max()
@@ -73,6 +72,7 @@ class FeatureEngineTests(unittest.TestCase):
         for column in (
             "ema20",
             "ema50",
+            "rsi14",
             "atr14",
             "volume20",
             "breakout_high",
