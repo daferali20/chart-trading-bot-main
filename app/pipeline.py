@@ -80,14 +80,18 @@ class DecisionPipeline:
         if not correlations or not selected_symbols:
             return None
 
+        normalized_correlations = {
+            (left.upper(), right.upper()): float(value)
+            for (left, right), value in correlations.items()
+        }
         values: list[float] = []
         symbol = symbol.upper()
         for other in selected_symbols:
             other = other.upper()
-            if (symbol, other) in correlations:
-                values.append(abs(float(correlations[(symbol, other)])))
-            elif (other, symbol) in correlations:
-                values.append(abs(float(correlations[(other, symbol)])))
+            if (symbol, other) in normalized_correlations:
+                values.append(abs(normalized_correlations[(symbol, other)]))
+            elif (other, symbol) in normalized_correlations:
+                values.append(abs(normalized_correlations[(other, symbol)]))
         return max(values) if values else None
 
     def evaluate(
@@ -106,19 +110,24 @@ class DecisionPipeline:
             raise ValueError("capital must be positive")
         if peak_account_value <= 0:
             raise ValueError("peak_account_value must be positive")
+        if not symbol_data:
+            raise ValueError("symbol_data is empty")
 
+        normalized_data = {symbol.upper(): df for symbol, df in symbol_data.items()}
         sectors = {key.upper(): value for key, value in (sectors or {}).items()}
-        mtf_frames = mtf_frames or {}
+        normalized_mtf = {
+            symbol.upper(): frames
+            for symbol, frames in (mtf_frames or {}).items()
+        }
 
         insights: dict[str, SignalInsight] = {}
         candidates: list[PortfolioCandidate] = []
 
-        for raw_symbol, df in symbol_data.items():
-            symbol = raw_symbol.upper()
+        for symbol, df in normalized_data.items():
             insight = self.signal_engine.analyze(
                 df,
                 market_df=market_df,
-                mtf_frames=mtf_frames.get(raw_symbol) or mtf_frames.get(symbol),
+                mtf_frames=normalized_mtf.get(symbol),
             )
             insights[symbol] = insight
 
@@ -202,7 +211,7 @@ class DecisionPipeline:
                     active_positions=len(selected_symbols),
                     sector_weight_after_trade=sector_weight_after,
                     max_candidate_correlation=max_correlation,
-                    dollar_volume=self._latest_dollar_volume(symbol_data[symbol] if symbol in symbol_data else next(df for key, df in symbol_data.items() if key.upper() == symbol)),
+                    dollar_volume=self._latest_dollar_volume(normalized_data[symbol]),
                 )
             )
 
