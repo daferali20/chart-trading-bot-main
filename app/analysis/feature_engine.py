@@ -6,6 +6,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from app.data.normalizer import DEFAULT_DATA_NORMALIZER
+
 
 @dataclass(frozen=True)
 class FeatureConfig:
@@ -33,7 +35,8 @@ class FeatureEngine:
 
     Required columns for the core engine are ``high``, ``low`` and ``close``.
     ``volume`` is optional; volume features are only produced when it exists.
-    ``date`` is optional; when present, rows are sorted chronologically.
+    Market time may arrive as ``date`` or ``timestamp`` and is normalized by
+    the shared Data Layer before features are calculated.
 
     Compatibility aliases are intentionally retained for the current bot:
     ``williams_r``, ``rsi14``, ``ema20``, ``ema50``, ``atr14``, ``volume20``,
@@ -45,31 +48,12 @@ class FeatureEngine:
 
     @staticmethod
     def normalize(df: pd.DataFrame) -> pd.DataFrame:
-        if df is None or df.empty:
-            raise ValueError("DataFrame is empty.")
-
-        out = df.copy()
-        out.columns = [str(column).strip().lower() for column in out.columns]
-
-        required = {"high", "low", "close"}
-        missing = required - set(out.columns)
-        if missing:
-            raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-        numeric_columns = [
-            column
-            for column in ("open", "high", "low", "close", "volume")
-            if column in out.columns
-        ]
-        for column in numeric_columns:
-            out[column] = pd.to_numeric(out[column], errors="coerce")
-
-        if "date" in out.columns:
-            out["date"] = pd.to_datetime(out["date"], errors="coerce")
-            out = out.sort_values("date", kind="stable")
-            out = out.drop_duplicates(subset=["date"], keep="last")
-
-        return out.reset_index(drop=True)
+        return DEFAULT_DATA_NORMALIZER.normalize(
+            df,
+            require_open=False,
+            require_volume=False,
+            preserve_extra=True,
+        )
 
     @staticmethod
     def _positive_periods(periods: Iterable[int]) -> tuple[int, ...]:
