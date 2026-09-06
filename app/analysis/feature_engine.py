@@ -92,10 +92,11 @@ class FeatureEngine:
 
     def _add_averages(self, out: pd.DataFrame) -> None:
         for period in self._positive_periods(self.config.ema_periods):
+            # No min_periods here by design: this preserves the EMA behaviour
+            # already used by the live bot and the WEMA5 baseline.
             out[f"ema{period}"] = out["close"].ewm(
                 span=period,
                 adjust=False,
-                min_periods=period,
             ).mean()
 
         for period in self._positive_periods(self.config.ma_periods):
