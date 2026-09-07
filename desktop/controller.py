@@ -4,7 +4,7 @@ from PySide6.QtCore import QThread
 
 from app.config import settings
 from app.ui_worker2 import IndependentScannerWorker
-from .dashboard import MainWindow as DashboardWindow
+from .dashboard_v2 import MainWindow as DashboardWindow, STYLE
 
 
 class MainWindow(DashboardWindow):
@@ -48,7 +48,8 @@ class MainWindow(DashboardWindow):
         self.worker.start_scanning()
         self.start_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
-        self._log("Scanner STARTED")
+        mode = "PAPER EXECUTION" if getattr(settings, "auto_execution_enabled", False) else "ANALYSIS ONLY"
+        self._log(f"Scanner STARTED | {mode}")
 
     def pause_scanner(self):
         if self.worker:
@@ -67,6 +68,8 @@ class MainWindow(DashboardWindow):
 
     def emergency_stop(self):
         self.emergency_active = True
+        settings.auto_execution_enabled = False
+        self._sync_execution_ui()
         if self.worker:
             self.worker.pause_scanning()
             self.worker.stop()
@@ -75,7 +78,9 @@ class MainWindow(DashboardWindow):
         self.gate_status.setText("EMERGENCY STOP")
         self.gate_reason.setText("All new execution is stopped. Reconnect manually to resume.")
         self.risk_gate.setText("GATE: EMERGENCY STOP")
-        self._log("EMERGENCY STOP | new execution disabled")
+        self.m_gate.value.setText("STOPPED")
+        self.m_gate.sub.setText("Emergency stop active")
+        self._log("EMERGENCY STOP | auto execution OFF | new execution disabled")
 
 
 def run():
@@ -83,7 +88,7 @@ def run():
     import sys
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setStyleSheet(DashboardWindow.__module__ and __import__("desktop.dashboard", fromlist=["STYLE"]).STYLE)
+    app.setStyleSheet(STYLE)
     window = MainWindow()
     window.show()
     return app.exec()
