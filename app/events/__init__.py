@@ -9,6 +9,8 @@ from app.events.impact import EventImpactEngine
 from app.events.alpha import EventAlphaAdapter
 from app.events.attribution import EventAttributionEngine, TradeEventAttribution
 from app.events.provider import NewsEventProvider
+from app.events.sentiment import FinancialHeadlineSentiment
+from app.events.serpapi_provider import SerpApiNewsProvider
 
 __all__ = [
     "EventType",
@@ -20,4 +22,6 @@ __all__ = [
     "EventAttributionEngine",
     "TradeEventAttribution",
     "NewsEventProvider",
+    "FinancialHeadlineSentiment",
+    "SerpApiNewsProvider",
 ]
