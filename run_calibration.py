@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-samples", type=int, default=30, help="Minimum matured samples before any adjustment")
     parser.add_argument("--duration", default="30 D", help="IBKR history duration used for outcome matching")
     parser.add_argument("--timeframe", default="", help="Optional IBKR bar size override; defaults to TIMEFRAME")
+    parser.add_argument("--validity-days", type=int, default=30, help="Days before learned calibration expires")
     parser.add_argument(
         "--output",
         default="logs/calibration/latest.json",
@@ -126,6 +127,7 @@ async def main() -> None:
         engine_outcomes: dict[str, list[ForwardOutcome]] = defaultdict(list)
         alpha_outcomes: dict[str, list[ForwardOutcome]] = defaultdict(list)
         event_samples: dict[str, list[tuple[float, bool]]] = defaultdict(list)
+        training_boundaries: list[str] = []
 
         engine_seen: set[tuple[str, str]] = set()
         alpha_seen: set[tuple[str, str]] = set()
@@ -139,6 +141,8 @@ async def main() -> None:
                     action=entry.get(action_key),
                     bars=bars,
                 )
+                if result is not None:
+                    training_boundaries.append(result.future_date)
                 add_unique_outcome(
                     engine_outcomes,
                     engine_seen,
@@ -162,6 +166,8 @@ async def main() -> None:
                     action=action,
                     bars=bars,
                 )
+                if result is not None:
+                    training_boundaries.append(result.future_date)
                 add_unique_outcome(
                     alpha_outcomes,
                     alpha_seen,
@@ -191,6 +197,7 @@ async def main() -> None:
             )
             if result is None:
                 continue
+            training_boundaries.append(result.future_date)
 
             token = (event_type, result.anchor_date)
             if token in event_seen:
@@ -211,12 +218,16 @@ async def main() -> None:
             for key, values in sorted(event_samples.items())
         )
 
+        training_end_at = max(training_boundaries) if training_boundaries else None
         snapshot = build_snapshot(
             horizon_bars=horizon,
             minimum_samples=minimum_samples,
             alpha_estimates=alpha_estimates,
             event_estimates=event_estimates,
             engine_estimates=engine_estimates,
+            training_end_at=training_end_at,
+            source_symbol=symbol,
+            validity_days=max(1, int(args.validity_days)),
         )
         output = snapshot.save(args.output)
 
@@ -261,7 +272,9 @@ async def main() -> None:
                 f"offset={item.probability_offset:+.3f}"
             )
 
-        print(f"\nCalibration snapshot: {output}")
+        print(f"\nTraining data ends: {snapshot.training_end_at or 'NO MATURED OUTCOMES'}")
+        print(f"Snapshot expires:   {snapshot.valid_until}")
+        print(f"Calibration snapshot: {output}")
         if not snapshot.alpha_weights and not snapshot.event_probability_offsets:
             print(
                 "No learned alpha/news adjustment is active yet. This is expected "
