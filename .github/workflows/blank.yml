@@ -17,5 +17,5 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python -m compileall app desktop run_desktop.py run_webhook.py run_shadow.py run_news.py run_shadow_outcomes.py
+      - run: python -m compileall app desktop run_desktop.py run_webhook.py run_shadow.py run_news.py run_shadow_outcomes.py run_calibration.py
       - run: python -m unittest discover -s tests -v
