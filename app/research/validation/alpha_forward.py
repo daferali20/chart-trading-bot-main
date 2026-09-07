@@ -167,11 +167,14 @@ class AlphaForwardValidator:
 
                 window = features.iloc[entry_index : exit_index + 1]
                 if direction is SignalDirection.LONG:
-                    mfe = ((float(window["high"].max()) / entry) - 1.0) * 100.0
-                    mae = ((float(window["low"].min()) / entry) - 1.0) * 100.0
+                    mfe = ((float(window["high"].max()) - entry) / entry) * 100.0
+                    mae = ((float(window["low"].min()) - entry) / entry) * 100.0
                 else:
-                    mfe = ((entry / float(window["low"].min())) - 1.0) * 100.0
-                    mae = -((float(window["high"].max()) / entry) - 1.0) * 100.0
+                    # Express excursions in symmetric percentage-of-entry terms.
+                    # Favorable for a short is price falling below entry; adverse
+                    # is price rising above it.
+                    mfe = ((entry - float(window["low"].min())) / entry) * 100.0
+                    mae = -((float(window["high"].max()) - entry) / entry) * 100.0
 
                 observations.append(
                     AlphaForwardObservation(
