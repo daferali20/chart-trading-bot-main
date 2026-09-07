@@ -41,7 +41,20 @@ class IBKRClient:
                 return float(item.value)
         raise RuntimeError("NetLiquidation was not available from IBKR")
 
-    async def historical_bars(self, symbol: str | None = None):
+    async def historical_bars(
+        self,
+        symbol: str | None = None,
+        *,
+        duration: str | None = None,
+        timeframe: str | None = None,
+        use_rth: bool = True,
+    ):
+        """Return historical OHLCV bars.
+
+        ``duration`` and ``timeframe`` are optional read-only overrides used by
+        research/reporting tools. Existing callers retain the configured
+        ``HISTORY_DURATION`` and ``TIMEFRAME`` behavior unchanged.
+        """
         await self.connect()
         symbol = (symbol or settings.symbol).upper()
         contract = Stock(symbol, settings.exchange, settings.currency)
@@ -51,10 +64,10 @@ class IBKRClient:
         bars = await self.ib.reqHistoricalDataAsync(
             contract,
             endDateTime="",
-            durationStr=settings.history_duration,
-            barSizeSetting=settings.timeframe,
+            durationStr=(duration or settings.history_duration),
+            barSizeSetting=(timeframe or settings.timeframe),
             whatToShow="TRADES",
-            useRTH=True,
+            useRTH=bool(use_rth),
             formatDate=1,
             keepUpToDate=False,
         )
