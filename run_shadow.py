@@ -11,6 +11,7 @@ from app.broker.ibkr import IBKRClient
 from app.config import settings
 from app.events.factory import build_serpapi_news_service
 from app.shadow import DEFAULT_SHADOW_EVALUATOR
+from app.shadow_adaptive import DEFAULT_ADAPTIVE_SHADOW_EVALUATOR
 from app.shadow_news import DEFAULT_NEWS_SHADOW_EVALUATOR
 
 
@@ -114,6 +115,27 @@ async def main() -> None:
         print(f"Agreement: {'YES' if comparison.agreement else 'NO'}")
         print(f"Score delta: {comparison.score_delta:+.2f}")
         print(f"Shadow log: {log_path}")
+
+        adaptive = DEFAULT_ADAPTIVE_SHADOW_EVALUATOR.compare(
+            symbol,
+            symbol_df,
+            market_df=market_df,
+        )
+        adaptive_log = DEFAULT_ADAPTIVE_SHADOW_EVALUATOR.append_log(adaptive)
+        print()
+        print("Regime-adaptive shadow:")
+        print(
+            f"  Static v2: {adaptive.static_action} | "
+            f"score={adaptive.static_score:.2f}"
+        )
+        print(
+            f"  Adaptive: {adaptive.adaptive_action} | "
+            f"score={adaptive.adaptive_score:.2f} | "
+            f"delta={adaptive.score_delta:+.2f}"
+        )
+        print(f"  Selected models: {', '.join(adaptive.selected_models) or 'NONE'}")
+        print(f"  Decision changed: {'YES' if adaptive.decision_changed else 'NO'}")
+        print(f"  Adaptive shadow log: {adaptive_log}")
 
         await _run_news_shadow(symbol, symbol_df, market_df)
         print("NO ORDER WAS SENT — SHADOW MODE ONLY")
