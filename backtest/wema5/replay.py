@@ -28,6 +28,30 @@ def load_csv(path: Path) -> pd.DataFrame:
     return data
 
 
+def _compound_return(returns: list[float]) -> float:
+    compound = 1.0
+    for value in returns:
+        compound *= 1.0 + value
+    return compound - 1.0
+
+
+def _max_drawdown(returns: list[float]) -> float:
+    """Return closed-trade equity max drawdown as a positive magnitude."""
+
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+
+    for value in returns:
+        equity *= 1.0 + value
+        peak = max(peak, equity)
+        if peak > 0:
+            drawdown = (peak - equity) / peak
+            max_drawdown = max(max_drawdown, drawdown)
+
+    return max_drawdown
+
+
 def _trade_metrics(trades: list[dict]) -> dict:
     returns = [float(trade["return"]) for trade in trades]
     if not returns:
@@ -37,14 +61,14 @@ def _trade_metrics(trades: list[dict]) -> dict:
             "compound_return": 0.0,
             "average_trade": 0.0,
             "profit_factor": 0.0,
+            "max_drawdown": 0.0,
+            "trade_concentration": 0.0,
+            "best_trade_return": 0.0,
+            "compound_without_best_trade": 0.0,
         }
 
     wins = [value for value in returns if value > 0]
     losses = [value for value in returns if value <= 0]
-
-    compound = 1.0
-    for value in returns:
-        compound *= 1.0 + value
 
     gross_profit = sum(wins)
     gross_loss = abs(sum(losses))
@@ -54,12 +78,34 @@ def _trade_metrics(trades: list[dict]) -> dict:
         else float("inf")
     )
 
+    best_trade = max(returns)
+    best_index = returns.index(best_trade)
+    returns_without_best = [
+        value
+        for index, value in enumerate(returns)
+        if index != best_index
+    ]
+
+    trade_concentration = (
+        max(wins) / gross_profit
+        if wins and gross_profit > 0
+        else 0.0
+    )
+
     return {
         "closed_trades": len(returns),
         "win_rate": len(wins) / len(returns),
-        "compound_return": compound - 1.0,
+        "compound_return": _compound_return(returns),
         "average_trade": sum(returns) / len(returns),
         "profit_factor": profit_factor,
+        "max_drawdown": _max_drawdown(returns),
+        "trade_concentration": trade_concentration,
+        "best_trade_return": best_trade,
+        "compound_without_best_trade": (
+            _compound_return(returns_without_best)
+            if returns_without_best
+            else 0.0
+        ),
     }
 
 
@@ -183,6 +229,13 @@ def run_replay(
             print("Profit factor  : INF")
         else:
             print(f"Profit factor  : {metrics['profit_factor']:.2f}")
+        print(f"Max drawdown   : {metrics['max_drawdown'] * 100:.2f}%")
+        print(f"Best trade     : {metrics['best_trade_return'] * 100:.2f}%")
+        print(f"Trade concentration: {metrics['trade_concentration'] * 100:.2f}%")
+        print(
+            "Return excl. best trade: "
+            f"{metrics['compound_without_best_trade'] * 100:.2f}%"
+        )
 
     for number, trade in enumerate(result["trades"], start=1):
         print(
@@ -209,9 +262,10 @@ def main() -> None:
         ("SPY", data_dir / "SPY_1d.csv"),
         ("AAPL", data_dir / "AAPL_1d.csv"),
         ("AMD", data_dir / "AMD_1d.csv"),
+        ("NVDA", data_dir / "NVDA_1d.csv"),
     ]
 
-    for days in (7, 14, 30, 60):
+    for days in (7, 14, 30, 60, 252):
         print()
         print("#" * 80)
         print(f"WEMA5 SHORT REPLAY — LAST {days} DAYS")
