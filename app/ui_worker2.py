@@ -92,6 +92,11 @@ class IndependentScannerWorker(QObject):
             self.scan.emit({"symbol": symbol, "signal": signal, "context": context, "chart": chart_data})
             if signal.action != "BUY" or signal.stop is None:
                 continue
+            if not settings.auto_execution_enabled:
+                self.status.emit(
+                    f"AUTO EXECUTION OFF | {symbol} BUY kept inside bot | analysis only"
+                )
+                continue
             record = await self.orders.submit_signal(symbol, signal, source="scanner")
             if record:
                 self.order.emit(record)
@@ -109,14 +114,20 @@ class IndependentScannerWorker(QObject):
             while self.running:
                 try:
                     await self.orders.refresh_all_statuses()
-                    tv_processed, tv_submitted = await self.tv.process_pending()
-                    if tv_processed or tv_submitted:
-                        self.status.emit(f"TradingView queue | processed={tv_processed} | submitted={tv_submitted}")
+                    if settings.auto_execution_enabled:
+                        tv_processed, tv_submitted = await self.tv.process_pending()
+                        if tv_processed or tv_submitted:
+                            self.status.emit(
+                                f"TradingView queue | processed={tv_processed} | submitted={tv_submitted}"
+                            )
                     positions, open_orders, executed = await self._snapshot()
-                    self.status.emit(f"Portfolio verified | positions={len(positions)} | open orders={len(open_orders)} | executed={executed}/{settings.max_executed_orders}")
+                    self.status.emit(
+                        f"Portfolio verified | positions={len(positions)} | open orders={len(open_orders)} | executed={executed}/{settings.max_executed_orders}"
+                    )
                     now = time.monotonic()
                     if self.scan_enabled.is_set() and now - last_scan >= self.interval:
-                        self.status.emit("Scanner running | analyzing watchlist")
+                        mode = "PAPER EXECUTION" if settings.auto_execution_enabled else "ANALYSIS ONLY"
+                        self.status.emit(f"Scanner running | analyzing watchlist | {mode}")
                         await self._scan_once()
                         last_scan = time.monotonic()
                     await asyncio.sleep(1.0)
@@ -136,7 +147,8 @@ class IndependentScannerWorker(QObject):
     @Slot()
     def start_scanning(self):
         self.scan_enabled.set()
-        self.status.emit("Scanner STARTED")
+        mode = "PAPER EXECUTION" if settings.auto_execution_enabled else "ANALYSIS ONLY"
+        self.status.emit(f"Scanner STARTED | {mode}")
 
     @Slot()
     def pause_scanning(self):
