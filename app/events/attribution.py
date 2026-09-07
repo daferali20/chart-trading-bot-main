@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections.abc import Iterable
 
 from app.events.impact import DEFAULT_EVENT_IMPACT_ENGINE
@@ -30,6 +30,12 @@ class EventAttributionEngine:
     def __init__(self, impact_threshold: float = 35.0) -> None:
         self.impact_threshold = float(impact_threshold)
 
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     def attribute(
         self,
         *,
@@ -41,14 +47,20 @@ class EventAttributionEngine:
         post_days: int = 1,
     ) -> TradeEventAttribution:
         symbol = symbol.upper()
-        start = entry_time - timedelta(days=max(0, pre_days))
-        end = exit_time + timedelta(days=max(0, post_days))
+        entry_utc = self._utc(entry_time)
+        exit_utc = self._utc(exit_time)
+        if exit_utc < entry_utc:
+            raise ValueError("exit_time must not be before entry_time")
+
+        start = entry_utc - timedelta(days=max(0, pre_days))
+        end = exit_utc + timedelta(days=max(0, post_days))
 
         matched: list[tuple[NewsEvent, float]] = []
         for event in events:
             if event.symbol.upper() != symbol:
                 continue
-            if start <= event.published_at <= end:
+            event_time = self._utc(event.published_at)
+            if start <= event_time <= end:
                 forecast = DEFAULT_EVENT_IMPACT_ENGINE.forecast(event)
                 matched.append((event, forecast.impact_score))
 
