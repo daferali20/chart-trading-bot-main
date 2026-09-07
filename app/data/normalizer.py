@@ -13,6 +13,19 @@ class DataNormalizer:
 
     TIME_ALIASES = ("date", "timestamp", "datetime", "time")
 
+    @staticmethod
+    def _parse_time(values) -> pd.Series:
+        try:
+            return pd.to_datetime(values, errors="coerce", utc=False)
+        except ValueError as exc:
+            # CSV exports from timezone-aware sources can contain both -04:00
+            # and -05:00 offsets across daylight-saving transitions. Pandas 3
+            # rejects those with utc=False, so normalize only that mixed-zone
+            # case to UTC instead of failing the whole research dataset.
+            if "Mixed timezones" not in str(exc):
+                raise
+            return pd.to_datetime(values, errors="coerce", utc=True)
+
     def normalize(
         self,
         df: pd.DataFrame,
@@ -42,7 +55,7 @@ class DataNormalizer:
             None,
         )
         if time_column is not None:
-            parsed = pd.to_datetime(out[time_column], errors="coerce", utc=False)
+            parsed = self._parse_time(out[time_column])
             out[time_column] = parsed
             if "date" not in out.columns:
                 out["date"] = parsed
