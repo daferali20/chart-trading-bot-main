@@ -46,6 +46,23 @@ def fake_yahoo_history(symbol: str, **kwargs) -> pd.DataFrame:
     )
 
 
+def fake_yahoo_dst_history(symbol: str, **kwargs) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Open": [10.0, 11.0],
+            "High": [11.0, 12.0],
+            "Low": [9.0, 10.0],
+            "Close": [10.5, 11.5],
+            "Volume": [1000, 2000],
+        },
+        index=pd.DatetimeIndex(
+            ["2026-03-06 00:00:00", "2026-03-09 00:00:00"],
+            tz="America/New_York",
+            name="Date",
+        ),
+    )
+
+
 class DataNormalizerTests(unittest.TestCase):
     def test_timestamp_is_promoted_to_date_and_sorted(self) -> None:
         frame = pd.DataFrame(
@@ -75,6 +92,22 @@ class DataNormalizerTests(unittest.TestCase):
         out = DataNormalizer().normalize(frame)
         self.assertEqual(len(out), 1)
         self.assertEqual(float(out.iloc[0]["close"]), 11.0)
+
+    def test_mixed_dst_offsets_are_parsed_without_failure(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "date": [
+                    "2026-03-06 00:00:00-05:00",
+                    "2026-03-09 00:00:00-04:00",
+                ],
+                "high": [11, 12],
+                "low": [9, 10],
+                "close": [10.5, 11.5],
+            }
+        )
+        out = DataNormalizer().normalize(frame)
+        self.assertEqual(len(out), 2)
+        self.assertTrue(out["date"].is_monotonic_increasing)
 
     def test_feature_engine_accepts_ibkr_timestamp_contract(self) -> None:
         frame = pd.DataFrame(
@@ -135,6 +168,19 @@ class DataProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(list(out["close"]), [10.5, 11.5])
         self.assertTrue(out["date"].is_monotonic_increasing)
+
+    async def test_yahoo_daily_provider_preserves_session_dates_across_dst(self) -> None:
+        provider = YahooDataProvider(
+            period="5y",
+            interval="1d",
+            history_loader=fake_yahoo_dst_history,
+        )
+        out = await provider.historical_bars("AAA")
+        self.assertFalse(isinstance(out["date"].dtype, pd.DatetimeTZDtype))
+        self.assertEqual(
+            [value.strftime("%Y-%m-%d") for value in out["date"]],
+            ["2026-03-06", "2026-03-09"],
+        )
 
     async def test_yahoo_provider_rejects_empty_history(self) -> None:
         provider = YahooDataProvider(
