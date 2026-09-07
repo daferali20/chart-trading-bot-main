@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from app.config import settings
-from desktop.intelligence_cockpit import MainWindow
+from desktop.intelligence_cockpit_v3 import MainWindow
 
 
 class PremiumDashboardTests(unittest.TestCase):
@@ -26,6 +26,7 @@ class PremiumDashboardTests(unittest.TestCase):
             self.assertEqual(window.opportunity_table.columnCount(), 10)
             self.assertIn("OPTIONAL", window.side_tv.text())
             self.assertEqual(window.selected_data_source, "IBKR")
+            self.assertTrue(window.tv_btn.isHidden())
             window.close()
         finally:
             settings.auto_execution_enabled = original
