@@ -28,6 +28,8 @@ class NewsEvent:
     published_at: datetime
     source: str = ""
     body: str = ""
+    url: str = ""
+    provider: str = ""
     event_type: EventType = EventType.OTHER
     sentiment: float = 0.0
     relevance: float = 1.0
