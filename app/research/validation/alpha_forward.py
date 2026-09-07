@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import median
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import pandas as pd
 
 from app.analysis.feature_engine import DEFAULT_FEATURE_ENGINE
+from app.analysis.regime import DEFAULT_REGIME_ENGINE
 from app.strategy.base import AlphaModel
 from app.strategy.fusion import SignalDirection
 
@@ -25,6 +26,7 @@ class AlphaForwardObservation:
     correct_direction: bool
     mfe_pct: float
     mae_pct: float
+    market_regime: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class AlphaForwardValidationResult:
     observations: tuple[AlphaForwardObservation, ...]
     summaries: tuple[AlphaForwardSummary, ...]
     raw_directional_signals: int
+    regime_eligible_directional_signals: int
     independent_signal_episodes: int
 
 
@@ -56,6 +59,10 @@ class AlphaForwardValidator:
     the NEXT bar open. Returns are then measured to the close at 1/3/5/... bars
     after the signal. Consecutive same-direction signals are one episode by
     default so persistent conditions do not artificially inflate sample size.
+
+    Optional market-regime filtering is causal: ``build_regime_timeline``
+    classifies each benchmark date from the benchmark prefix ending on that
+    date, never from future bars.
     """
 
     def __init__(
@@ -76,6 +83,26 @@ class AlphaForwardValidator:
         if isinstance(value, pd.Timestamp):
             return value.isoformat()
         return str(value)
+
+    @staticmethod
+    def _date_key(value) -> str:
+        parsed = pd.to_datetime(value)
+        if isinstance(parsed, pd.Timestamp):
+            return parsed.date().isoformat()
+        return str(value)[:10]
+
+    def build_regime_timeline(self, market_data: pd.DataFrame) -> dict[str, str]:
+        """Build a causal benchmark regime timeline keyed by YYYY-MM-DD."""
+        if market_data is None or market_data.empty:
+            raise ValueError("Market benchmark data is empty")
+        normalized = DEFAULT_FEATURE_ENGINE.normalize(market_data)
+        timeline: dict[str, str] = {}
+        for index in range(len(normalized)):
+            prefix = normalized.iloc[: index + 1]
+            snapshot = DEFAULT_REGIME_ENGINE.classify(prefix)
+            date_value = prefix.iloc[-1].get("date", prefix.iloc[-1].get("timestamp"))
+            timeline[self._date_key(date_value)] = snapshot.regime.value
+        return timeline
 
     @staticmethod
     def _summary(
@@ -115,13 +142,25 @@ class AlphaForwardValidator:
         self,
         model: AlphaModel,
         data: pd.DataFrame,
+        *,
+        regime_by_date: Mapping[str, str] | None = None,
+        allowed_regimes: Iterable[str] | None = None,
     ) -> AlphaForwardValidationResult:
         if data is None or data.empty:
             raise ValueError("Validation data is empty")
 
+        allowed = (
+            None
+            if allowed_regimes is None
+            else {str(value).upper() for value in allowed_regimes}
+        )
+        if allowed is not None and regime_by_date is None:
+            raise ValueError("allowed_regimes requires regime_by_date")
+
         features = DEFAULT_FEATURE_ENGINE.build(data)
         observations: list[AlphaForwardObservation] = []
         raw_directional = 0
+        regime_eligible = 0
         independent = 0
         active_episode_direction: SignalDirection | None = None
 
@@ -136,6 +175,16 @@ class AlphaForwardValidator:
                 continue
 
             raw_directional += 1
+            signal_date = self._date(features.iloc[index])
+            date_key = self._date_key(signal_date)
+            regime = None if regime_by_date is None else regime_by_date.get(date_key)
+            if allowed is not None and str(regime or "UNKNOWN").upper() not in allowed:
+                # The strategy is inactive in this regime, so a later eligible
+                # signal starts a fresh episode.
+                active_episode_direction = None
+                continue
+
+            regime_eligible += 1
             if (
                 self.deduplicate_episodes
                 and active_episode_direction is direction
@@ -170,9 +219,6 @@ class AlphaForwardValidator:
                     mfe = ((float(window["high"].max()) - entry) / entry) * 100.0
                     mae = ((float(window["low"].min()) - entry) / entry) * 100.0
                 else:
-                    # Express excursions in symmetric percentage-of-entry terms.
-                    # Favorable for a short is price falling below entry; adverse
-                    # is price rising above it.
                     mfe = ((entry - float(window["low"].min())) / entry) * 100.0
                     mae = -((float(window["high"].max()) - entry) / entry) * 100.0
 
@@ -180,7 +226,7 @@ class AlphaForwardValidator:
                     AlphaForwardObservation(
                         model=model.name,
                         direction=direction.value,
-                        signal_date=self._date(features.iloc[index]),
+                        signal_date=signal_date,
                         entry_date=self._date(features.iloc[entry_index]),
                         horizon_bars=horizon,
                         entry_price=entry,
@@ -190,6 +236,7 @@ class AlphaForwardValidator:
                         correct_direction=signed_return > 0.0,
                         mfe_pct=mfe,
                         mae_pct=mae,
+                        market_regime=regime,
                     )
                 )
 
@@ -205,6 +252,7 @@ class AlphaForwardValidator:
             observations=tuple(observations),
             summaries=summaries,
             raw_directional_signals=raw_directional,
+            regime_eligible_directional_signals=regime_eligible,
             independent_signal_episodes=independent,
         )
 
