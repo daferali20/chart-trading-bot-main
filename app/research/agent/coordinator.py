@@ -32,6 +32,13 @@ class ResearchApprovalPolicy:
     min_oos_return: float = 0.0
     min_oos_profit_factor: float = 1.0
     max_oos_drawdown: float = 0.25
+    # Applied automatically when an event-aware backtest supplies normal-market
+    # metrics. Legacy experiments remain backward-compatible until they are
+    # upgraded to classify NORMAL vs EVENT_RELATED trades.
+    min_normal_trade_count: int = 10
+    min_normal_return: float = 0.0
+    min_normal_profit_factor: float = 1.20
+    max_event_profit_share: float = 0.60
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,12 @@ class ResearchAgentCoordinator:
         "profit_factor",
         "win_rate",
         "max_drawdown",
+    )
+    NORMAL_MARKET_METRICS = (
+        "normal_trade_count",
+        "normal_return",
+        "normal_profit_factor",
+        "event_profit_share",
     )
 
     def __init__(
@@ -185,6 +198,41 @@ class ResearchAgentCoordinator:
         # 0% fold dispersion -> 1.0 stability; 20%+ -> 0.0.
         return max(0.0, min(1.0, 1.0 - (std / 0.20)))
 
+    def _normal_market_reasons(self, oos: Mapping[str, float]) -> list[str]:
+        # Only activate this gate when the experiment supplies at least one
+        # event-aware metric. Once activated, the full evidence set is required.
+        if not any(key in oos for key in self.NORMAL_MARKET_METRICS):
+            return []
+
+        reasons: list[str] = []
+        missing = [key for key in self.NORMAL_MARKET_METRICS if key not in oos]
+        if missing:
+            return [
+                "Incomplete normal-market OOS evidence: " + ", ".join(missing)
+            ]
+
+        normal_trades = int(round(oos["normal_trade_count"]))
+        if normal_trades < self.policy.min_normal_trade_count:
+            reasons.append(
+                f"Insufficient normal-market trades: {normal_trades} < "
+                f"{self.policy.min_normal_trade_count}"
+            )
+        if oos["normal_return"] <= self.policy.min_normal_return:
+            reasons.append("Normal-market OOS return did not exceed minimum")
+        if oos["normal_profit_factor"] < self.policy.min_normal_profit_factor:
+            reasons.append(
+                "Normal-market OOS profit factor below minimum "
+                f"({oos['normal_profit_factor']:.2f} < "
+                f"{self.policy.min_normal_profit_factor:.2f})"
+            )
+        if oos["event_profit_share"] > self.policy.max_event_profit_share:
+            reasons.append(
+                "Candidate depends too heavily on event-driven positive returns "
+                f"({oos['event_profit_share']:.1%} > "
+                f"{self.policy.max_event_profit_share:.1%})"
+            )
+        return reasons
+
     def _decision_reasons(
         self,
         *,
@@ -212,6 +260,7 @@ class ResearchAgentCoordinator:
             reasons.append("Out-of-sample profit factor below minimum")
         if abs(oos.get("max_drawdown", float("inf"))) > self.policy.max_oos_drawdown:
             reasons.append("Out-of-sample drawdown exceeds maximum")
+        reasons.extend(self._normal_market_reasons(oos))
         return reasons
 
     def _save_final_report(self, result: ExperimentResult) -> Path:
@@ -272,6 +321,9 @@ class ResearchAgentCoordinator:
         result.validation = {
             "walk_forward": walk_forward,
             "oos_candidate_metrics": oos,
+            "normal_market_evidence_present": any(
+                key in oos for key in self.NORMAL_MARKET_METRICS
+            ),
             "stability": stability,
             "robustness_score": robustness.score,
             "robustness_components": robustness.components,
