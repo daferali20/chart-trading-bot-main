@@ -37,16 +37,8 @@ async def main() -> None:
     print(f"Events: {len(result.events)}")
     print()
 
-    forecast_by_type = list(result.forecasts)
+    print("News events:")
     for number, event in enumerate(result.events, start=1):
-        forecast = next(
-            (
-                item
-                for item in forecast_by_type
-                if item.event_type == event.event_type
-            ),
-            None,
-        )
         print(f"{number:02d}. {event.published_at.isoformat()} | {event.source}")
         print(f"    {event.headline}")
         print(
@@ -54,21 +46,26 @@ async def main() -> None:
             f"sentiment={event.sentiment:+.2f} "
             f"relevance={event.relevance:.2f}"
         )
-        if forecast is not None:
-            print(
-                f"    forecast={forecast.direction} "
-                f"P(up)={forecast.probability_up:.1%} "
-                f"P(down)={forecast.probability_down:.1%} "
-                f"move={forecast.expected_move_low_pct:.1f}%–"
-                f"{forecast.expected_move_high_pct:.1f}% "
-                f"confidence={forecast.confidence:.1f}%"
-            )
         if event.url:
             print(f"    {event.url}")
         print()
 
-    strongest = result.strongest
-    if strongest is not None:
+    if result.forecasts:
+        print("Ranked impact forecasts:")
+        for number, forecast in enumerate(result.forecasts, start=1):
+            print(
+                f"{number:02d}. {forecast.event_type.value} | {forecast.direction} | "
+                f"P(up)={forecast.probability_up:.1%} "
+                f"P(down)={forecast.probability_down:.1%} "
+                f"P(neutral)={forecast.probability_neutral:.1%} | "
+                f"move={forecast.expected_move_low_pct:.1f}%–"
+                f"{forecast.expected_move_high_pct:.1f}% | "
+                f"impact={forecast.impact_score:.1f} | "
+                f"confidence={forecast.confidence:.1f}%"
+            )
+
+        strongest = result.strongest
+        print()
         print("Strongest event forecast:")
         print(
             f"  {strongest.event_type.value} | {strongest.direction} | "
