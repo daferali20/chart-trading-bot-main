@@ -1,5 +1,10 @@
 from app.data.normalizer import DataNormalizer, DEFAULT_DATA_NORMALIZER
-from app.data.providers import CSVDataProvider, IBKRDataProvider, MarketDataProvider
+from app.data.providers import (
+    CSVDataProvider,
+    IBKRDataProvider,
+    MarketDataProvider,
+    YahooDataProvider,
+)
 
 __all__ = [
     "DataNormalizer",
@@ -7,4 +12,5 @@ __all__ = [
     "MarketDataProvider",
     "CSVDataProvider",
     "IBKRDataProvider",
+    "YahooDataProvider",
 ]
