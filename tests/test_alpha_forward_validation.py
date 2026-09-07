@@ -50,9 +50,8 @@ class AlphaForwardValidatorTests(unittest.TestCase):
             TestAlpha(),
             self.frame(),
         )
-        # Directional closes at indexes 1,2 and 5,6. The final episode has no
-        # next bar for index 6, but it is still a detected directional signal.
         self.assertEqual(result.raw_directional_signals, 4)
+        self.assertEqual(result.regime_eligible_directional_signals, 4)
         self.assertEqual(result.independent_signal_episodes, 2)
         self.assertEqual(result.summaries[0].samples, 2)
 
@@ -78,6 +77,38 @@ class AlphaForwardValidatorTests(unittest.TestCase):
         self.assertEqual(result.raw_directional_signals, 4)
         self.assertEqual(result.independent_signal_episodes, 4)
         self.assertEqual(result.summaries[0].samples, 3)
+
+    def test_regime_filter_only_counts_eligible_signal_dates(self) -> None:
+        timeline = {
+            "2026-01-01": "BULL",
+            "2026-01-02": "BULL",
+            "2026-01-03": "SIDEWAYS",
+            "2026-01-04": "BULL",
+            "2026-01-05": "BULL",
+            "2026-01-06": "SIDEWAYS",
+            "2026-01-07": "BULL",
+        }
+        result = AlphaForwardValidator(horizons=(1,), deduplicate_episodes=True).validate(
+            TestAlpha(),
+            self.frame(),
+            regime_by_date=timeline,
+            allowed_regimes=("SIDEWAYS",),
+        )
+        self.assertEqual(result.raw_directional_signals, 4)
+        self.assertEqual(result.regime_eligible_directional_signals, 2)
+        self.assertEqual(result.independent_signal_episodes, 2)
+        self.assertEqual(result.summaries[0].samples, 2)
+        self.assertTrue(
+            all(item.market_regime == "SIDEWAYS" for item in result.observations)
+        )
+
+    def test_regime_filter_requires_timeline(self) -> None:
+        with self.assertRaises(ValueError):
+            AlphaForwardValidator(horizons=(1,)).validate(
+                TestAlpha(),
+                self.frame(),
+                allowed_regimes=("SIDEWAYS",),
+            )
 
 
 if __name__ == "__main__":
