@@ -4,7 +4,7 @@ from PySide6.QtCore import QThread
 
 from app.config import settings
 from app.ui_worker2 import IndependentScannerWorker
-from .intelligence_cockpit import MainWindow as DashboardWindow, STYLE
+from .intelligence_cockpit_v3 import MainWindow as DashboardWindow, STYLE
 
 
 class MainWindow(DashboardWindow):
