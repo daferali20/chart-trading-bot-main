@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from collections.abc import Iterable, Sequence
@@ -50,6 +50,19 @@ class CalibrationSnapshot:
     alpha_weights: dict[str, float]
     event_probability_offsets: dict[str, float]
     engine_weights: dict[str, float]
+    training_end_at: str | None = None
+    valid_until: str | None = None
+    source_symbol: str = ""
+
+    @staticmethod
+    def _utc(value: str | datetime) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -74,6 +87,51 @@ class CalibrationSnapshot:
             0.05,
             min(0.95, raw + self.event_probability_offset(event_type)),
         )
+
+    def is_causal_for(self, observed_at: str | datetime) -> bool:
+        """True only when the decision occurs strictly after calibration training data."""
+        observed = self._utc(observed_at)
+        boundary_text = self.training_end_at or self.generated_at
+        try:
+            boundary = self._utc(boundary_text)
+        except (TypeError, ValueError):
+            return False
+        return observed > boundary
+
+    def is_fresh(
+        self,
+        *,
+        now: str | datetime | None = None,
+        fallback_max_age_days: int = 30,
+    ) -> bool:
+        """Reject expired, future-dated, or excessively old research state."""
+        current = self._utc(now or datetime.now(timezone.utc))
+        try:
+            generated = self._utc(self.generated_at)
+        except (TypeError, ValueError):
+            return False
+        if generated > current + timedelta(minutes=5):
+            return False
+
+        if self.valid_until:
+            try:
+                return current <= self._utc(self.valid_until)
+            except (TypeError, ValueError):
+                return False
+
+        age_limit = timedelta(days=max(1, int(fallback_max_age_days)))
+        return (current - generated) <= age_limit
+
+    def usable_for(
+        self,
+        observed_at: str | datetime,
+        *,
+        fallback_max_age_days: int = 30,
+    ) -> bool:
+        return self.is_fresh(
+            now=observed_at,
+            fallback_max_age_days=fallback_max_age_days,
+        ) and self.is_causal_for(observed_at)
 
     def save(self, path: str | Path) -> Path:
         destination = Path(path)
@@ -103,6 +161,17 @@ class CalibrationSnapshot:
                 str(key): float(value)
                 for key, value in dict(payload.get("engine_weights", {})).items()
             },
+            training_end_at=(
+                None
+                if payload.get("training_end_at") in {None, ""}
+                else str(payload["training_end_at"])
+            ),
+            valid_until=(
+                None
+                if payload.get("valid_until") in {None, ""}
+                else str(payload["valid_until"])
+            ),
+            source_symbol=str(payload.get("source_symbol") or ""),
         )
 
 
@@ -296,9 +365,19 @@ def build_snapshot(
     alpha_estimates: Iterable[ReliabilityEstimate] = (),
     event_estimates: Iterable[ProbabilityCalibrationEstimate] = (),
     engine_estimates: Iterable[ReliabilityEstimate] = (),
+    training_end_at: str | None = None,
+    source_symbol: str = "",
+    validity_days: int = 30,
+    generated_at: str | None = None,
 ) -> CalibrationSnapshot:
+    generated = (
+        datetime.now(timezone.utc)
+        if generated_at is None
+        else CalibrationSnapshot._utc(generated_at)
+    )
+    valid_until = generated + timedelta(days=max(1, int(validity_days)))
     return CalibrationSnapshot(
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=generated.isoformat(),
         horizon_bars=int(horizon_bars),
         minimum_samples=int(minimum_samples),
         alpha_weights={
@@ -316,6 +395,9 @@ def build_snapshot(
             for item in engine_estimates
             if item.eligible
         },
+        training_end_at=training_end_at,
+        valid_until=valid_until.isoformat(),
+        source_symbol=str(source_symbol).upper(),
     )
 
 
