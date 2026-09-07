@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     min_score:int=4; fixed_quantity:int=100; take_profit_percent:float=10.0
     max_active_trades:int=7; max_active_positions:int=7; max_open_orders:int=7; max_executed_orders:int=7; execution_count_scope:str="DAY"
     risk_per_trade:float=0.01; paper_account_value:float=100000.0; atr_stop_mult:float=1.5; reward_risk:float=2.0
+    auto_execution_enabled:bool=False
     tradingview_webhook_enabled:bool=True; tradingview_webhook_host:str="127.0.0.1"; tradingview_webhook_port:int=8000; tradingview_webhook_token:str="CHANGE_ME"
     serpapi_api_key:str=""; serpapi_gl:str="us"; serpapi_hl:str="en"; serpapi_news_limit:int=20; serpapi_timeout_seconds:float=12.0
     news_shadow_enabled:bool=False; news_shadow_lookback_hours:int=48
