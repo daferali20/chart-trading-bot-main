@@ -21,9 +21,16 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install research dependencies
-        run: pip install "pandas>=2.2.0" "numpy>=1.26.0" "yfinance>=1.7.0,<2.0"
+        run: >-
+          pip install
+          "pandas>=2.2.0"
+          "numpy>=1.26.0"
+          "yfinance>=1.7.0,<2.0"
+          "pydantic-settings>=2.4.0"
+          "python-dotenv>=1.0.1"
       - name: Download five years and run Alpha matrix
         run: |
+          set -o pipefail
           mkdir -p logs/yahoo_research
           python run_yahoo_research.py \
             --universe research/universes/us_research_30.txt \
