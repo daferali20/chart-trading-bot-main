@@ -54,6 +54,27 @@ class CalibrationSnapshot:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def alpha_multiplier(self, alpha_name: str, regime: str) -> float:
+        return float(
+            self.alpha_weights.get(
+                f"{str(alpha_name)}|{str(regime).upper()}",
+                1.0,
+            )
+        )
+
+    def event_probability_offset(self, event_type: str) -> float:
+        return float(self.event_probability_offsets.get(str(event_type).upper(), 0.0))
+
+    def engine_multiplier(self, engine_name: str) -> float:
+        return float(self.engine_weights.get(str(engine_name), 1.0))
+
+    def calibrate_event_probability(self, event_type: str, raw_probability: float) -> float:
+        raw = max(0.01, min(0.99, float(raw_probability)))
+        return max(
+            0.05,
+            min(0.95, raw + self.event_probability_offset(event_type)),
+        )
+
     def save(self, path: str | Path) -> Path:
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
