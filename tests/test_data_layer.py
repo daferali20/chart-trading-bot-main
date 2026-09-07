@@ -8,7 +8,7 @@ import pandas as pd
 
 from app.analysis.feature_engine import DEFAULT_FEATURE_ENGINE
 from app.data.normalizer import DataNormalizer
-from app.data.providers import CSVDataProvider, IBKRDataProvider
+from app.data.providers import CSVDataProvider, IBKRDataProvider, YahooDataProvider
 
 
 class FakeIBKRClient:
@@ -23,6 +23,27 @@ class FakeIBKRClient:
                 "volume": [2000, 1000],
             }
         )
+
+
+def fake_yahoo_history(symbol: str, **kwargs) -> pd.DataFrame:
+    assert symbol == "AAA"
+    assert kwargs["period"] == "5y"
+    assert kwargs["interval"] == "1d"
+    assert kwargs["auto_adjust"] is True
+    assert kwargs["repair"] is True
+    return pd.DataFrame(
+        {
+            "Open": [10.0, 11.0],
+            "High": [11.0, 12.0],
+            "Low": [9.0, 10.0],
+            "Close": [10.5, 11.5],
+            "Volume": [1000, 2000],
+        },
+        index=pd.DatetimeIndex(
+            ["2026-01-01", "2026-01-02"],
+            name="Date",
+        ),
+    )
 
 
 class DataNormalizerTests(unittest.TestCase):
@@ -98,6 +119,29 @@ class DataProviderTests(unittest.IsolatedAsyncioTestCase):
             out = await provider.historical_bars("aaa")
             self.assertEqual(list(out["close"]), [10.5, 11.5])
             self.assertEqual(list(out.columns), ["date", "open", "high", "low", "close", "volume"])
+
+    async def test_yahoo_provider_normalizes_datetime_index_and_uses_adjusted_repair(self) -> None:
+        provider = YahooDataProvider(
+            period="5y",
+            interval="1d",
+            auto_adjust=True,
+            repair=True,
+            history_loader=fake_yahoo_history,
+        )
+        out = await provider.historical_bars("aaa")
+        self.assertEqual(
+            list(out.columns),
+            ["date", "open", "high", "low", "close", "volume"],
+        )
+        self.assertEqual(list(out["close"]), [10.5, 11.5])
+        self.assertTrue(out["date"].is_monotonic_increasing)
+
+    async def test_yahoo_provider_rejects_empty_history(self) -> None:
+        provider = YahooDataProvider(
+            history_loader=lambda symbol, **kwargs: pd.DataFrame(),
+        )
+        with self.assertRaises(RuntimeError):
+            await provider.historical_bars("AAA")
 
 
 if __name__ == "__main__":
