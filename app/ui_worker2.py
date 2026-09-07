@@ -4,12 +4,14 @@ import asyncio
 import threading
 import time
 
+import pandas as pd
 from PySide6.QtCore import QObject, Signal, Slot
 
 from app.analysis.chart_engine import add_chart_indicators, chart_context
 from app.analysis.indicators import add_indicators
 from app.broker.ibkr import IBKRClient
 from app.config import settings
+from app.data.providers import YahooDataProvider
 from app.execution.order_manager import OrderManager
 from app.scanner import load_watchlist, merge_candidates, top_gainers
 from app.strategy.adaptive_engine import DEFAULT_ADAPTIVE_SIGNAL_ENGINE
@@ -18,12 +20,75 @@ from app.strategy.signal_engine import DEFAULT_SIGNAL_ENGINE
 from app.tradingview.bridge import TradingViewBridge
 
 
-class IndependentScannerWorker(QObject):
-    """Persistent IBKR worker. Connection, scanner start/pause and disconnect are separate controls.
+def yahoo_fallback_spec(timeframe: str) -> tuple[str, str, str | None]:
+    """Map the desktop timeframe to a Yahoo-compatible fallback request.
 
-    The legacy chart signal remains the execution-facing signal. Signal Engine v2,
-    Market Regime and Adaptive analysis are attached as read-only intelligence
-    context for the premium desktop cockpit and shadow comparison.
+    Yahoo has no native 10-minute interval, so 5-minute bars are fetched and
+    resampled to 10 minutes locally.  The requested periods are intentionally
+    modest because this path is for temporary live-analysis continuity, not the
+    long-horizon research datasets.
+    """
+
+    value = str(timeframe or "").strip().lower()
+    mapping = {
+        "1 min": ("7d", "1m", None),
+        "5 mins": ("1mo", "5m", None),
+        "10 mins": ("1mo", "5m", "10min"),
+        "15 mins": ("1mo", "15m", None),
+        "30 mins": ("1mo", "30m", None),
+        "1 hour": ("3mo", "60m", None),
+        "1 day": ("5y", "1d", None),
+    }
+    return mapping.get(value, ("1mo", "5m", "10min"))
+
+
+def prepare_yahoo_live_frame(frame: pd.DataFrame, resample_rule: str | None = None) -> pd.DataFrame:
+    """Convert normalized Yahoo bars to the live worker's timestamp schema."""
+
+    if frame is None or frame.empty:
+        raise ValueError("Yahoo fallback frame is empty")
+
+    out = frame.copy()
+    if "timestamp" not in out.columns:
+        if "date" not in out.columns:
+            raise ValueError("Yahoo fallback frame has no date/timestamp column")
+        out = out.rename(columns={"date": "timestamp"})
+
+    out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce")
+    out = out.dropna(subset=["timestamp", "open", "high", "low", "close", "volume"])
+    out = out.sort_values("timestamp", kind="stable")
+
+    if resample_rule:
+        indexed = out.set_index("timestamp")
+        out = (
+            indexed.resample(resample_rule, label="left", closed="left")
+            .agg(
+                {
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                    "volume": "sum",
+                }
+            )
+            .dropna(subset=["open", "high", "low", "close"])
+            .reset_index()
+        )
+
+    return out[["timestamp", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+class IndependentScannerWorker(QObject):
+    """Persistent IBKR worker with safe Yahoo analysis fallback.
+
+    IBKR remains the broker and preferred live-market source.  If IBKR cannot
+    provide historical bars for a symbol, Yahoo may temporarily provide bars
+    for analysis/Shadow continuity.  Any signal built from Yahoo fallback data
+    is explicitly forbidden from reaching order submission.
+
+    The legacy chart signal remains the execution-facing signal when the data
+    source is IBKR. Signal Engine v2, Market Regime and Adaptive analysis are
+    attached as read-only intelligence context for the premium cockpit.
     """
 
     status = Signal(str)
@@ -42,6 +107,7 @@ class IndependentScannerWorker(QObject):
         self.orders = OrderManager(self.client)
         self.tv = TradingViewBridge(self.orders)
         self.semaphore = asyncio.Semaphore(4)
+        self._yahoo_providers: dict[tuple[str, str], YahooDataProvider] = {}
 
     @Slot()
     def run(self):
@@ -70,6 +136,53 @@ class IndependentScannerWorker(QObject):
         if value == "SHORT":
             return "SELL"
         return "HOLD"
+
+    @staticmethod
+    def _short_error(exc: Exception, limit: int = 150) -> str:
+        text = " ".join(str(exc).split())
+        return text if len(text) <= limit else text[: limit - 3] + "..."
+
+    def _yahoo_provider(self) -> tuple[YahooDataProvider, str | None, str]:
+        period, interval, resample_rule = yahoo_fallback_spec(settings.timeframe)
+        key = (period, interval)
+        provider = self._yahoo_providers.get(key)
+        if provider is None:
+            provider = YahooDataProvider(
+                period=period,
+                interval=interval,
+                auto_adjust=True,
+                repair=True,
+                prepost=False,
+                timeout=15.0,
+            )
+            self._yahoo_providers[key] = provider
+        label = f"Yahoo {interval}" + (f"→{resample_rule}" if resample_rule else "")
+        return provider, resample_rule, label
+
+    async def _historical_with_fallback(self, symbol: str) -> tuple[pd.DataFrame, str, str | None]:
+        try:
+            frame = await self.client.historical_bars(symbol)
+            return frame, "IBKR", None
+        except Exception as ibkr_error:
+            if not getattr(settings, "yahoo_fallback_enabled", True):
+                raise
+
+            provider, resample_rule, label = self._yahoo_provider()
+            try:
+                yahoo_frame = await provider.historical_bars(symbol)
+                live_frame = prepare_yahoo_live_frame(yahoo_frame, resample_rule)
+                if len(live_frame) < 60:
+                    raise RuntimeError(f"only {len(live_frame)} usable bars returned")
+                reason = self._short_error(ibkr_error)
+                self.status.emit(
+                    f"DATA FALLBACK | {symbol.upper()} | IBKR unavailable -> {label} | analysis only"
+                )
+                return live_frame, "YAHOO_FALLBACK", reason
+            except Exception as yahoo_error:
+                raise RuntimeError(
+                    f"IBKR data failed ({self._short_error(ibkr_error)}); "
+                    f"Yahoo fallback also failed ({self._short_error(yahoo_error)})"
+                ) from yahoo_error
 
     def _intelligence_context(self, legacy_signal, advanced, adaptive) -> dict:
         contribution_by_name = {
@@ -139,10 +252,10 @@ class IndependentScannerWorker(QObject):
             "calibration_status": "waiting for mature samples",
         }
 
-    async def analyze_symbol(self, symbol, market_df=None):
+    async def analyze_symbol(self, symbol, market_df=None, market_source="IBKR"):
         async with self.semaphore:
             try:
-                raw_df = await self.client.historical_bars(symbol)
+                raw_df, data_source, fallback_reason = await self._historical_with_fallback(symbol)
 
                 # Read-only intelligence stack. Nothing below this block can
                 # submit an order; the legacy chart signal remains execution-facing.
@@ -154,6 +267,14 @@ class IndependentScannerWorker(QObject):
                 signal = evaluate_chart(df)
                 context = chart_context(df)
                 context.update(self._intelligence_context(signal, advanced, adaptive))
+                context.update(
+                    {
+                        "data_source": data_source,
+                        "market_data_source": market_source,
+                        "execution_data_safe": data_source == "IBKR",
+                        "data_fallback_reason": fallback_reason,
+                    }
+                )
 
                 chart_data = {
                     "timestamps": [str(x) for x in df["timestamp"].tail(120).tolist()],
@@ -190,33 +311,55 @@ class IndependentScannerWorker(QObject):
 
     async def _market_context(self):
         try:
-            return await self.client.historical_bars(
-                "SPY",
-                duration=settings.history_duration,
-                timeframe=settings.timeframe,
-            )
+            frame, source, _ = await self._historical_with_fallback("SPY")
+            if source != "IBKR":
+                self.status.emit("MARKET REGIME | SPY using Yahoo fallback temporarily")
+            return frame, source
         except Exception as exc:
-            self.status.emit(f"MARKET REGIME | SPY benchmark unavailable | {exc}")
-            return None
+            self.status.emit(f"MARKET REGIME | SPY benchmark unavailable | {self._short_error(exc)}")
+            return None, "UNAVAILABLE"
 
     async def _scan_once(self):
-        gainers = await top_gainers(self.client.ib, settings.top_gainers_count)
         custom = load_watchlist(settings.watchlist_file)
+        try:
+            gainers = await top_gainers(self.client.ib, settings.top_gainers_count)
+        except Exception as exc:
+            gainers = []
+            self.status.emit(
+                f"IBKR SCANNER FALLBACK | scanner unavailable | using watchlist | {self._short_error(exc)}"
+            )
+
         symbols = merge_candidates(gainers, custom)
-        market_df = await self._market_context()
-        results = await asyncio.gather(*(self.analyze_symbol(s, market_df=market_df) for s in symbols))
+        if not symbols:
+            symbols = [str(settings.symbol).upper()]
+            self.status.emit("IBKR SCANNER FALLBACK | watchlist empty | using active symbol")
+
+        market_df, market_source = await self._market_context()
+        results = await asyncio.gather(
+            *(self.analyze_symbol(s, market_df=market_df, market_source=market_source) for s in symbols)
+        )
+
         for symbol, signal, context, chart_data, error in results:
             if error:
                 self.error.emit(f"{symbol}: {error}")
                 continue
+
             self.scan.emit({"symbol": symbol, "signal": signal, "context": context, "chart": chart_data})
             if signal.action != "BUY" or signal.stop is None:
                 continue
+
+            if (context or {}).get("data_source") != "IBKR":
+                self.status.emit(
+                    f"EXECUTION BLOCKED | {symbol} BUY uses Yahoo fallback data | analysis only until IBKR data returns"
+                )
+                continue
+
             if not settings.auto_execution_enabled:
                 self.status.emit(
                     f"AUTO EXECUTION OFF | {symbol} BUY kept inside bot | analysis only"
                 )
                 continue
+
             record = await self.orders.submit_signal(symbol, signal, source="scanner")
             if record:
                 self.order.emit(record)
