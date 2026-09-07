@@ -8,5 +8,6 @@ class Settings(BaseSettings):
     risk_per_trade:float=0.01; paper_account_value:float=100000.0; atr_stop_mult:float=1.5; reward_risk:float=2.0
     tradingview_webhook_enabled:bool=True; tradingview_webhook_host:str="127.0.0.1"; tradingview_webhook_port:int=8000; tradingview_webhook_token:str="CHANGE_ME"
     serpapi_api_key:str=""; serpapi_gl:str="us"; serpapi_hl:str="en"; serpapi_news_limit:int=20; serpapi_timeout_seconds:float=12.0
+    news_shadow_enabled:bool=False; news_shadow_lookback_hours:int=48
     model_config=SettingsConfigDict(env_file=".env",env_file_encoding="utf-8",extra="ignore")
 settings=Settings()
