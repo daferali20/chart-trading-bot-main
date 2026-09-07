@@ -1,0 +1,44 @@
+# Diversified liquid US research universe — daily Yahoo research only
+# Technology / growth
+AAPL
+MSFT
+NVDA
+AMZN
+META
+GOOGL
+TSLA
+AMD
+PLTR
+
+# Financials / payments
+JPM
+BAC
+GS
+V
+
+# Healthcare
+LLY
+JNJ
+UNH
+MRK
+
+# Energy
+XOM
+CVX
+COP
+
+# Industrials
+CAT
+GE
+RTX
+BA
+
+# Consumer
+WMT
+COST
+HD
+MCD
+KO
+
+# Communication / media
+DIS
