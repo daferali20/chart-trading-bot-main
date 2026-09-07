@@ -5,7 +5,18 @@ strategy definitions and historical data, but it must not import or call the
 IBKR execution stack.
 """
 
+from app.research.calibration import (
+    CalibrationSnapshot,
+    DirectionalProbabilityCalibrator,
+    ReliabilityCalibrator,
+)
 from app.research.experiments.runner import ExperimentRunner
 from app.research.registry.strategy_registry import StrategyRegistry
 
-__all__ = ["ExperimentRunner", "StrategyRegistry"]
+__all__ = [
+    "ExperimentRunner",
+    "StrategyRegistry",
+    "CalibrationSnapshot",
+    "ReliabilityCalibrator",
+    "DirectionalProbabilityCalibrator",
+]
