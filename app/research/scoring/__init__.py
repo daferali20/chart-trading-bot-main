@@ -1,5 +1,11 @@
 """Research scoring models with explicit robustness/overfitting penalties."""
 
+from app.research.scoring.alpha_breadth import (
+    DEFAULT_ALPHA_BREADTH_EVALUATOR,
+    AlphaBreadthEvidence,
+    AlphaBreadthEvaluator,
+    SymbolAlphaEvidence,
+)
 from app.research.scoring.event_aware import (
     DEFAULT_EVENT_AWARE_BACKTEST_ANALYZER,
     EventAwareBacktestAnalyzer,
@@ -30,4 +36,8 @@ __all__ = [
     "EventAwarePerformanceReport",
     "EventAwareBacktestAnalyzer",
     "DEFAULT_EVENT_AWARE_BACKTEST_ANALYZER",
+    "SymbolAlphaEvidence",
+    "AlphaBreadthEvidence",
+    "AlphaBreadthEvaluator",
+    "DEFAULT_ALPHA_BREADTH_EVALUATOR",
 ]
