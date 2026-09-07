@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from app.strategy.wema5.strategy import WEMA5Signal, WEMA5Strategy
-from backtest.wema5.replay import replay
+from backtest.wema5.replay import _trade_metrics, replay
 
 
 class WEMA5ReplayExecutionTests(unittest.TestCase):
@@ -60,6 +60,20 @@ class WEMA5ReplayExecutionTests(unittest.TestCase):
 
         self.assertEqual(result["trades"], [])
         self.assertIsNone(result["open_position"])
+
+    def test_trade_metrics_expose_concentration_and_drawdown(self) -> None:
+        trades = [
+            {"return": 0.10},
+            {"return": -0.05},
+            {"return": 0.20},
+        ]
+
+        metrics = _trade_metrics(trades)
+
+        self.assertAlmostEqual(metrics["max_drawdown"], 0.05)
+        self.assertAlmostEqual(metrics["trade_concentration"], 2.0 / 3.0)
+        self.assertAlmostEqual(metrics["best_trade_return"], 0.20)
+        self.assertAlmostEqual(metrics["compound_without_best_trade"], 0.045)
 
 
 if __name__ == "__main__":
