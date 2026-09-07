@@ -26,14 +26,35 @@ def _optional_float(value) -> float | None:
     return None if pd.isna(value) else float(value)
 
 
-def _load_calibration() -> CalibrationSnapshot | None:
+def _load_calibration(symbol: str) -> CalibrationSnapshot | None:
     if not CALIBRATION_PATH.exists():
         return None
     try:
-        return CalibrationSnapshot.load(CALIBRATION_PATH)
+        snapshot = CalibrationSnapshot.load(CALIBRATION_PATH)
     except Exception as exc:
         print(f"Calibration snapshot: ERROR — {exc}")
         return None
+
+    symbol_upper = symbol.upper().strip()
+    if snapshot.source_symbol and snapshot.source_symbol.upper() != symbol_upper:
+        print(
+            "Calibration snapshot: SKIPPED — "
+            f"trained for {snapshot.source_symbol}, current symbol is {symbol_upper}"
+        )
+        return None
+
+    now = datetime.now(timezone.utc)
+    if not snapshot.is_fresh(now=now):
+        print("Calibration snapshot: SKIPPED — expired, stale, or future-dated")
+        return None
+    if not snapshot.is_causal_for(now):
+        print(
+            "Calibration snapshot: SKIPPED — current decision is not strictly "
+            "after the calibration training boundary"
+        )
+        return None
+
+    return snapshot
 
 
 def _run_calibrated_adaptive_shadow(
@@ -44,7 +65,7 @@ def _run_calibrated_adaptive_shadow(
 ) -> None:
     if snapshot is None:
         print()
-        print("Calibrated adaptive shadow: SKIPPED — no calibration snapshot")
+        print("Calibrated adaptive shadow: SKIPPED — no usable calibration snapshot")
         return
 
     evaluator = CalibratedShadowEvaluator(snapshot)
@@ -207,7 +228,7 @@ async def _run_news_shadow(
 async def main() -> None:
     client = IBKRClient()
     symbol = settings.symbol.upper()
-    snapshot = _load_calibration()
+    snapshot = _load_calibration(symbol)
 
     try:
         symbol_df = await client.historical_bars(symbol)
