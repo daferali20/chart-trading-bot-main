@@ -25,6 +25,7 @@ class AdaptiveShadowComparison:
     decision_changed: bool
     selected_models: tuple[str, ...]
     research_models_included: bool
+    alpha_signals: tuple[dict, ...] = ()
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,6 +44,22 @@ class AdaptiveShadowEvaluator:
         self.adaptive_engine = adaptive_engine or AdaptiveSignalEngine(
             include_research=False
         )
+
+    @staticmethod
+    def _serialize_alpha(alpha) -> dict:
+        return {
+            "name": alpha.name,
+            "direction": alpha.direction.value,
+            "confidence": round(float(alpha.confidence), 6),
+            "quality": round(float(alpha.quality), 6),
+            "weight": round(float(alpha.weight), 6),
+            "magnitude_pct": (
+                None
+                if alpha.magnitude_pct is None
+                else round(float(alpha.magnitude_pct), 6)
+            ),
+            "horizon": alpha.horizon,
+        }
 
     def compare(
         self,
@@ -76,6 +93,10 @@ class AdaptiveShadowEvaluator:
             decision_changed=adaptive.action != static.action,
             selected_models=adaptive_result.selected_model_names,
             research_models_included=adaptive_result.research_models_included,
+            alpha_signals=tuple(
+                self._serialize_alpha(alpha)
+                for alpha in adaptive.alphas
+            ),
         )
 
     @staticmethod
