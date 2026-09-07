@@ -46,6 +46,35 @@ class EventAttributionTests(unittest.TestCase):
         self.assertEqual(result.dominant_event_type, EventType.EARNINGS)
         self.assertGreater(result.max_impact_score, 35.0)
 
+    def test_naive_trade_times_are_normalized_against_utc_news(self) -> None:
+        event = NewsEvent(
+            symbol="AAA",
+            headline="Company beats earnings and raises outlook",
+            published_at=self.t0 + timedelta(hours=12),
+            event_type=EventType.EARNINGS,
+            sentiment=0.9,
+            relevance=1.0,
+            novelty=1.0,
+        )
+        result = EventAttributionEngine().attribute(
+            symbol="AAA",
+            entry_time=datetime(2026, 9, 1),
+            exit_time=datetime(2026, 9, 2),
+            events=[event],
+            pre_days=0,
+            post_days=0,
+        )
+        self.assertEqual(result.classification, "EVENT_RELATED")
+
+    def test_invalid_trade_window_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            EventAttributionEngine().attribute(
+                symbol="AAA",
+                entry_time=self.t0 + timedelta(days=2),
+                exit_time=self.t0,
+                events=[],
+            )
+
     def test_event_forecast_can_be_adapted_to_optional_alpha(self) -> None:
         event = NewsEvent(
             symbol="BBB",
