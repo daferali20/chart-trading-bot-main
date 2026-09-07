@@ -1,0 +1,48 @@
+name: Yahoo Research Matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/yahoo-research.yml"
+
+concurrency:
+  group: yahoo-research
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install research dependencies
+        run: pip install "pandas>=2.2.0" "numpy>=1.26.0" "yfinance>=1.7.0,<2.0"
+      - name: Download five years and run Alpha matrix
+        run: |
+          mkdir -p logs/yahoo_research
+          python run_yahoo_research.py \
+            --universe research/universes/us_research_30.txt \
+            --period 5y \
+            --interval 1d \
+            --benchmark SPY \
+            --extra-benchmarks QQQ IWM \
+            --horizons 3 5 10 \
+            --min-symbols 10 \
+            --min-samples-per-symbol 10 \
+            --report logs/yahoo_research/latest.json \
+            | tee logs/yahoo_research/run.txt
+      - name: Upload research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yahoo-research-5y
+          path: |
+            logs/yahoo_research/
+            data/yahoo/5y_1d/manifest.json
+          if-no-files-found: warn
+          retention-days: 14
