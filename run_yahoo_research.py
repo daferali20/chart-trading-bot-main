@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import defaultdict
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -11,6 +12,10 @@ import pandas as pd
 from app.data.providers import YahooDataProvider
 from app.research.datasets.yahoo import YahooDatasetBuilder
 from app.research.scoring.alpha_breadth import AlphaBreadthEvaluator, SymbolAlphaEvidence
+from app.research.scoring.temporal_stability import (
+    AlphaTemporalStabilityEvaluator,
+    TimeBucketAlphaEvidence,
+)
 from app.research.validation.alpha_forward import AlphaForwardValidator
 from app.strategy.breakout.alpha import BreakoutAlpha
 from app.strategy.mean_reversion.alpha import MeanReversionAlpha
@@ -70,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-samples-per-symbol", type=int, default=10)
     parser.add_argument("--min-positive-breadth", type=float, default=0.60)
     parser.add_argument("--min-median-hit", type=float, default=0.50)
+    parser.add_argument("--min-stable-periods", type=int, default=4)
+    parser.add_argument("--min-positive-period-ratio", type=float, default=0.60)
     parser.add_argument("--output-root", default="data/yahoo")
     parser.add_argument("--report", default="logs/yahoo_research/latest.json")
     return parser.parse_args()
@@ -105,6 +112,49 @@ def dataset_path_map(entries) -> dict[str, Path]:
 
 def breadth_payload(evidence) -> dict:
     return asdict(evidence)
+
+
+def _time_bucket(signal_date: str, dataset_start: pd.Timestamp) -> str:
+    stamp = pd.Timestamp(signal_date)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    start = dataset_start
+    if start.tzinfo is not None:
+        start = start.tz_convert("UTC").tz_localize(None)
+    days = max(0, int((stamp.normalize() - start.normalize()).days))
+    return f"P{(days // 365) + 1:02d}"
+
+
+def _temporal_evidence(
+    *,
+    symbol: str,
+    model: str,
+    observations,
+    dataset_start: pd.Timestamp,
+) -> list[TimeBucketAlphaEvidence]:
+    grouped: dict[tuple[int, str], list] = defaultdict(list)
+    for observation in observations:
+        bucket = _time_bucket(observation.signal_date, dataset_start)
+        grouped[(observation.horizon_bars, bucket)].append(observation)
+
+    output: list[TimeBucketAlphaEvidence] = []
+    for (horizon, bucket), items in sorted(grouped.items()):
+        output.append(
+            TimeBucketAlphaEvidence(
+                symbol=symbol,
+                period=bucket,
+                model=model,
+                horizon_bars=horizon,
+                samples=len(items),
+                average_signed_return_pct=(
+                    sum(item.signed_return_pct for item in items) / len(items)
+                ),
+                hit_rate=(
+                    sum(item.correct_direction for item in items) / len(items)
+                ),
+            )
+        )
+    return output
 
 
 async def main() -> None:
@@ -156,6 +206,12 @@ async def main() -> None:
         )
 
     benchmark_data = pd.read_csv(paths[benchmark])
+    benchmark_dates = pd.to_datetime(benchmark_data["date"], errors="coerce", utc=True)
+    dataset_start = benchmark_dates.min()
+    if pd.isna(dataset_start):
+        raise RuntimeError("Benchmark has no valid research dates")
+    dataset_start = pd.Timestamp(dataset_start)
+
     validator = AlphaForwardValidator(
         horizons=args.horizons,
         deduplicate_episodes=True,
@@ -167,16 +223,26 @@ async def main() -> None:
         minimum_positive_breadth=args.min_positive_breadth,
         minimum_median_hit_rate=args.min_median_hit,
     )
+    temporal_evaluator = AlphaTemporalStabilityEvaluator(
+        minimum_periods=args.min_stable_periods,
+        minimum_symbols_per_period=args.min_symbols,
+        minimum_samples_per_symbol_period=3,
+        minimum_positive_symbol_breadth=0.50,
+        minimum_positive_period_ratio=args.min_positive_period_ratio,
+        minimum_median_period_return_pct=0.0,
+        minimum_median_period_hit_rate=args.min_median_hit,
+    )
 
     report_models = []
     print()
-    print("Running overall + regime-fit Alpha breadth validation...")
+    print("Running overall + regime-fit Alpha breadth + temporal validation...")
 
     for model_key in args.models:
         model = MODEL_FACTORIES[model_key]()
         fitted_regimes = MODEL_REGIME_FIT[model_key]
         overall_by_horizon = {h: [] for h in validator.horizons}
         fitted_by_horizon = {h: [] for h in validator.horizons}
+        temporal_by_horizon = {h: [] for h in validator.horizons}
         symbol_rows = []
 
         for symbol in available_universe:
@@ -199,6 +265,15 @@ async def main() -> None:
                     SymbolAlphaEvidence(symbol, fitted_map[horizon])
                 )
 
+            for item in _temporal_evidence(
+                symbol=symbol,
+                model=model.name,
+                observations=fitted.observations,
+                dataset_start=dataset_start,
+            ):
+                if item.horizon_bars in temporal_by_horizon:
+                    temporal_by_horizon[item.horizon_bars].append(item)
+
             symbol_rows.append(
                 {
                     "symbol": symbol,
@@ -215,30 +290,38 @@ async def main() -> None:
         for horizon in validator.horizons:
             overall_breadth = breadth_evaluator.evaluate(overall_by_horizon[horizon])
             fitted_breadth = breadth_evaluator.evaluate(fitted_by_horizon[horizon])
+            temporal = temporal_evaluator.evaluate(temporal_by_horizon[horizon])
+            combined_eligible = fitted_breadth.eligible and temporal.eligible
             horizon_rows.append(
                 {
                     "horizon_bars": horizon,
                     "overall": breadth_payload(overall_breadth),
                     "regime_fit": breadth_payload(fitted_breadth),
+                    "temporal_stability": asdict(temporal),
+                    "combined_eligible": combined_eligible,
                 }
             )
 
         preferred = max(
             horizon_rows,
             key=lambda row: (
+                row["combined_eligible"],
                 row["regime_fit"]["eligible"],
+                row["temporal_stability"]["positive_period_ratio"],
                 row["regime_fit"]["positive_breadth"],
                 row["regime_fit"]["median_symbol_signed_return_pct"],
             ),
         )
-        status = "PASS" if preferred["regime_fit"]["eligible"] else "MORE_EVIDENCE"
+        status = "PASS" if preferred["combined_eligible"] else "MORE_EVIDENCE"
+        temporal = preferred["temporal_stability"]
         print(
             f"{model.name:<28} {status:<13} | "
             f"regimes={','.join(fitted_regimes):<24} | "
             f"best_h={preferred['horizon_bars']:>2} | "
             f"breadth={preferred['regime_fit']['positive_breadth']:.1%} | "
             f"median={preferred['regime_fit']['median_symbol_signed_return_pct']:+.3f}% | "
-            f"hit={preferred['regime_fit']['median_symbol_hit_rate']:.1%}"
+            f"hit={preferred['regime_fit']['median_symbol_hit_rate']:.1%} | "
+            f"stable_periods={temporal['positive_periods']}/{temporal['periods_with_min_symbols']}"
         )
 
         report_models.append(
@@ -265,6 +348,7 @@ async def main() -> None:
         "universe_available": available_universe,
         "download_errors": build_report.errors,
         "manifest": str(manifest_path),
+        "temporal_bucket_days": 365,
         "models": report_models,
     }
 
