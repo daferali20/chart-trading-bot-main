@@ -72,6 +72,8 @@ class YahooDataProvider:
     source only; IBKR stays the execution/live-market source.
     """
 
+    SESSION_INTERVALS = {"1d", "5d", "1wk", "1mo", "3mo"}
+
     def __init__(
         self,
         *,
@@ -112,6 +114,19 @@ class YahooDataProvider:
         if not ({"date", "datetime", "timestamp", "time"} & lower):
             frame = frame.reset_index()
         return frame
+
+    def _normalize_session_dates(self, frame: pd.DataFrame) -> pd.DataFrame:
+        if self.interval.lower() not in self.SESSION_INTERVALS or "date" not in frame.columns:
+            return frame
+
+        out = frame.copy()
+        dates = out["date"]
+        if isinstance(dates.dtype, pd.DatetimeTZDtype):
+            # Daily/weekly/monthly Yahoo bars represent market sessions. Keep
+            # the exchange-calendar date itself instead of converting midnight
+            # New York to UTC, which can complicate CSV parsing across DST.
+            out["date"] = dates.dt.tz_localize(None)
+        return out
 
     def _load_sync(self, symbol: str) -> pd.DataFrame:
         symbol = symbol.upper().strip()
@@ -161,6 +176,7 @@ class YahooDataProvider:
             require_volume=True,
             preserve_extra=False,
         )
+        normalized = self._normalize_session_dates(normalized)
         if normalized.empty:
             raise RuntimeError(f"Yahoo historical bars normalized to empty for {symbol}")
         return normalized
