@@ -11,6 +11,8 @@ from app.events.attribution import EventAttributionEngine, TradeEventAttribution
 from app.events.provider import NewsEventProvider
 from app.events.sentiment import FinancialHeadlineSentiment
 from app.events.serpapi_provider import SerpApiNewsProvider
+from app.events.service import NewsIntelligenceResult, NewsIntelligenceService
+from app.events.factory import build_serpapi_news_service
 
 __all__ = [
     "EventType",
@@ -24,4 +26,7 @@ __all__ = [
     "NewsEventProvider",
     "FinancialHeadlineSentiment",
     "SerpApiNewsProvider",
+    "NewsIntelligenceResult",
+    "NewsIntelligenceService",
+    "build_serpapi_news_service",
 ]
