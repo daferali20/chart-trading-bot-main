@@ -45,7 +45,11 @@ class MainWindow(BaseCockpit):
         advanced = context.get("advanced_signal") or {}
         legacy_signal = (data or {}).get("signal")
         legacy_action = str(getattr(legacy_signal, "action", "HOLD") or "HOLD").upper()
+        data_source = str(context.get("data_source") or "IBKR").upper()
+        market_source = str(context.get("market_data_source") or "IBKR").upper()
+        fallback_active = data_source != "IBKR"
 
+        source_label = "YAHOO FALLBACK" if fallback_active else "IBKR"
         if advanced:
             v2_action = str(advanced.get("action") or "HOLD").upper()
             v2_score = advanced.get("score")
@@ -54,7 +58,7 @@ class MainWindow(BaseCockpit):
             except Exception:
                 score_text = str(v2_score or "—")
             self.v2_meta.setText(
-                f"{settings.timeframe}  •  execution {legacy_action}  •  v2 {v2_action} {score_text}"
+                f"{settings.timeframe}  •  {source_label}  •  execution {legacy_action}  •  v2 {v2_action} {score_text}"
             )
             self.m_conf.sub.setText("Signal v2 ensemble")
 
@@ -70,13 +74,24 @@ class MainWindow(BaseCockpit):
             if horizon:
                 self.v2_horizon.setText(f"V2 horizon: {horizon}")
 
+        if fallback_active:
+            self.m_sig.sub.setText("Yahoo fallback • analysis only")
+            self.m_gate.value.setText("DATA FALLBACK")
+            self.m_gate.sub.setText("Yahoo data • IBKR execution blocked")
+        elif not getattr(settings, "auto_execution_enabled", False):
+            self.m_gate.value.setText("ANALYSIS ONLY")
+            self.m_gate.sub.setText("Auto Execution OFF")
+
         regime_confidence = context.get("regime_confidence")
         regime = str(context.get("market_regime") or "—").upper()
         if regime != "—" and regime_confidence is not None:
+            regime_source = "Yahoo fallback" if market_source != "IBKR" else "IBKR/SPY"
             try:
-                self.m_regime.sub.setText(f"SPY regime • {float(regime_confidence):.0f}% confidence")
+                self.m_regime.sub.setText(
+                    f"{regime_source} • {float(regime_confidence):.0f}% confidence"
+                )
             except Exception:
-                self.m_regime.sub.setText("SPY market regime")
+                self.m_regime.sub.setText(f"{regime_source} market regime")
 
         if not settings.news_shadow_enabled:
             # News remains visibly optional instead of looking broken or absent.
