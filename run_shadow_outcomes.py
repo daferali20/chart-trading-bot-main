@@ -13,7 +13,13 @@ LOG_SOURCES = (
     ("legacy", Path("logs/shadow_decisions.jsonl"), "legacy_action"),
     ("signal_v2", Path("logs/shadow_decisions.jsonl"), "advanced_action"),
     ("adaptive", Path("logs/adaptive_shadow_decisions.jsonl"), "adaptive_action"),
+    ("calibrated", Path("logs/calibrated_shadow_decisions.jsonl"), "calibrated_action"),
     ("news_aware", Path("logs/news_shadow_decisions.jsonl"), "combined_action"),
+    (
+        "news_calibrated",
+        Path("logs/calibrated_news_shadow_decisions.jsonl"),
+        "calibrated_combined_action",
+    ),
 )
 
 
@@ -43,36 +49,39 @@ async def main() -> None:
 
     try:
         bars = await client.historical_bars(symbol)
-        print("=" * 84)
+        print("=" * 92)
         print(f"SHADOW OUTCOME REPORT — {symbol}")
         print("FORWARD HORIZONS: 1 / 3 / 5 BARS")
         print("RESEARCH ONLY — NO ORDERS SENT")
-        print("=" * 84)
+        print("=" * 92)
 
         any_results = False
         for label, path, action_key in LOG_SOURCES:
-            outcomes = []
+            # Repeated runs inside the same market bar must not inflate sample
+            # size. The latest logged decision for an anchor/horizon wins.
+            unique = {}
             for entry in _load_entries(path, symbol):
                 observed_at = entry.get("observed_at")
                 action = entry.get(action_key)
                 if not observed_at or not action:
                     continue
-                outcomes.extend(
-                    evaluator.evaluate(
-                        observed_at=observed_at,
-                        action=action,
-                        bars=bars,
-                    )
-                )
+                for outcome in evaluator.evaluate(
+                    observed_at=observed_at,
+                    action=action,
+                    bars=bars,
+                ):
+                    token = (outcome.anchor_date, outcome.horizon_bars)
+                    unique[token] = outcome
 
+            outcomes = tuple(unique.values())
             summary = evaluator.summarize(outcomes)
             if summary.samples == 0:
-                print(f"{label:12s}: no matured outcomes yet")
+                print(f"{label:16s}: no matured outcomes yet")
                 continue
 
             any_results = True
             print(
-                f"{label:12s}: samples={summary.samples:3d} | "
+                f"{label:16s}: samples={summary.samples:3d} | "
                 f"hit={summary.hit_rate:6.1%} | "
                 f"avg signed={summary.average_signed_return_pct:+7.3f}% | "
                 f"median={summary.median_signed_return_pct:+7.3f}% | "
