@@ -50,6 +50,17 @@ def parse_args() -> argparse.Namespace:
         help="Forward bars to evaluate",
     )
     parser.add_argument(
+        "--market-csv",
+        default="",
+        help="Optional benchmark OHLCV CSV (for example SPY) used to build a causal regime timeline",
+    )
+    parser.add_argument(
+        "--regimes",
+        nargs="+",
+        default=None,
+        help="Optional allowed market regimes, e.g. SIDEWAYS or BULL HIGH_VOLATILITY",
+    )
+    parser.add_argument(
         "--count-repeated-signals",
         action="store_true",
         help="Count every directional bar instead of independent signal episodes",
@@ -60,25 +71,48 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.regimes and not args.market_csv:
+        raise SystemExit("--regimes requires --market-csv")
+
     data = pd.read_csv(args.csv)
     validator = AlphaForwardValidator(
         horizons=args.horizons,
         deduplicate_episodes=not args.count_repeated_signals,
     )
 
+    regime_by_date = None
+    if args.market_csv:
+        market_data = pd.read_csv(args.market_csv)
+        regime_by_date = validator.build_regime_timeline(market_data)
+
+    allowed_regimes = (
+        None if not args.regimes else tuple(value.upper() for value in args.regimes)
+    )
+
     reports = []
     print("=" * 106)
     print(f"ALPHA FORWARD RESEARCH — {Path(args.csv).name}")
     print("NEXT-BAR OPEN EXECUTION | RESEARCH ONLY | NO ORDERS SENT")
+    if args.market_csv:
+        print(f"BENCHMARK: {Path(args.market_csv).name}")
+    if allowed_regimes:
+        print(f"REGIME FILTER: {', '.join(allowed_regimes)}")
     print("=" * 106)
 
     for model_key in args.models:
         model = MODEL_FACTORIES[model_key]()
-        result = validator.validate(model, data)
+        result = validator.validate(
+            model,
+            data,
+            regime_by_date=regime_by_date,
+            allowed_regimes=allowed_regimes,
+        )
         report = {
             "model": model.name,
             "raw_directional_signals": result.raw_directional_signals,
+            "regime_eligible_directional_signals": result.regime_eligible_directional_signals,
             "independent_signal_episodes": result.independent_signal_episodes,
+            "allowed_regimes": list(allowed_regimes or ()),
             "summaries": [asdict(item) for item in result.summaries],
         }
         reports.append(report)
@@ -86,6 +120,7 @@ def main() -> None:
         print()
         print(
             f"{model.name}: raw={result.raw_directional_signals} | "
+            f"regime-eligible={result.regime_eligible_directional_signals} | "
             f"independent episodes={result.independent_signal_episodes}"
         )
         print(
