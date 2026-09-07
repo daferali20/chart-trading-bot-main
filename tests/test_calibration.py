@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +101,10 @@ class CalibrationTests(unittest.TestCase):
             minimum_samples=2,
             alpha_estimates=(alpha,),
             event_estimates=(event,),
+            training_end_at="2026-01-04T00:00:00+00:00",
+            source_symbol="aapl",
+            generated_at="2026-01-05T00:00:00+00:00",
+            validity_days=30,
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,6 +114,41 @@ class CalibrationTests(unittest.TestCase):
         self.assertIn("VolumeAlpha|BULL", loaded.alpha_weights)
         self.assertIn("CONTRACT", loaded.event_probability_offsets)
         self.assertEqual(loaded.horizon_bars, 3)
+        self.assertEqual(loaded.source_symbol, "AAPL")
+        self.assertEqual(loaded.training_end_at, "2026-01-04T00:00:00+00:00")
+        self.assertIsNotNone(loaded.valid_until)
+
+    def test_snapshot_rejects_decisions_at_or_before_training_boundary(self) -> None:
+        snapshot = build_snapshot(
+            horizon_bars=3,
+            minimum_samples=30,
+            training_end_at="2026-01-10T00:00:00+00:00",
+            generated_at="2026-01-10T01:00:00+00:00",
+        )
+        self.assertFalse(snapshot.is_causal_for("2026-01-10T00:00:00+00:00"))
+        self.assertFalse(snapshot.is_causal_for("2026-01-09T23:59:59+00:00"))
+        self.assertTrue(snapshot.is_causal_for("2026-01-10T00:00:01+00:00"))
+
+    def test_snapshot_expiry_is_enforced(self) -> None:
+        generated = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        snapshot = build_snapshot(
+            horizon_bars=3,
+            minimum_samples=30,
+            training_end_at=(generated - timedelta(days=1)).isoformat(),
+            generated_at=generated.isoformat(),
+            validity_days=10,
+        )
+        self.assertTrue(snapshot.is_fresh(now=generated + timedelta(days=9)))
+        self.assertTrue(snapshot.is_fresh(now=generated + timedelta(days=10)))
+        self.assertFalse(snapshot.is_fresh(now=generated + timedelta(days=11)))
+
+    def test_snapshot_rejects_future_generated_state(self) -> None:
+        snapshot = build_snapshot(
+            horizon_bars=3,
+            minimum_samples=30,
+            generated_at="2026-02-01T00:00:00+00:00",
+        )
+        self.assertFalse(snapshot.is_fresh(now="2026-01-01T00:00:00+00:00"))
 
 
 if __name__ == "__main__":
